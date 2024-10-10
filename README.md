@@ -92,6 +92,17 @@ journalctl -u mqtt-pg-logger --no-pager --since "5 minutes ago"
 sudo systemctl enable mqtt-pg-logger.service
 ```
 
+## Testing 
+
+### Prerequisites 
+
+- Docker 
+- [Act](https://nektosact.com/installation/index.html) (For running GitHub Actions locally).
+  - I recommend installing the [GitHub CLI Extension](https://nektosact.com/installation/gh.html)
+
+### How to run 
+Just run `act push` . If you're using the GitHub CLI Extension run `gh act push`. This will trigger the workflow file that should run on a GitHub `push` event. On first run, you will be asked to pick the size of the running, just pick 'Medium'.
+
 ## Additional infos
 
 ## Database infos
