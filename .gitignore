@@ -44,4 +44,4 @@ __work__/
 *.log
 mqtt-pg-logger.yaml
 mqtt-pg-logger.service
-
+certs

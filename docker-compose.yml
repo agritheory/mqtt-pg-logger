@@ -1,0 +1,44 @@
+version: '3'
+services:
+  artemis:
+    image: apache/activemq-artemis:latest-alpine
+    ports:
+      - 8161:8161 # Web Console
+      - 61616:61616 # Main Messaging Port
+      - 1883:1883 # MQTT Port
+    volumes:
+      - ./certs:/etc/ssl/certs
+      - ./broker.xml:/var/lib/artemis-instance/etc-override/broker.xml
+    restart: unless-stopped
+
+  mqtt-pg-logger:
+    build: .
+    depends_on:
+      - artemis
+      - timescaledb
+    environment:
+      - MQTT_HOST=artemis
+      - MQTT_PORT=61616
+      - MQTT_USER=artemis
+      - MQTT_PASSWORD=artemis
+      - POSTGRES_HOST=timescaledb
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DATABASE=postgres
+      - CA_CERT_PATH=/etc/ssl/certs/server-ca.crt
+    volumes:
+      - ./certs:/etc/ssl/certs
+    restart: unless-stopped
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=postgres
+    restart: unless-stopped
+
+volumes:
+  artemis-config:
