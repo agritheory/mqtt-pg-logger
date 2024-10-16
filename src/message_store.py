@@ -58,13 +58,13 @@ class MessageStore(Database):
         if not messages:
             return
 
-        copy_statement = sql.SQL("COPY {} (message_id, topic, text, qos, retain, time) FROM STDIN") \
+        copy_statement = sql.SQL("COPY {} (topic, text, qos, retain, time) FROM STDIN") \
             .format(sql.Identifier(self._table_name))
 
         with self._connection.cursor() as cursor:
             with cursor.copy(copy_statement) as copy:
                 for m in messages:
-                    data = (m.message_id, m.topic, m.text, m.qos, m.retain, m.time)
+                    data = (m.topic, m.text, m.qos, m.retain, m.time)
                     copy.write_row(data)
             cursor_rowcount = cursor.rowcount
 
