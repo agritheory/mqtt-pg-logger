@@ -3,7 +3,6 @@ import logging
 import os
 import pathlib
 import sys
-from typing import Dict, List, Optional
 
 import psycopg
 import testing.postgresql
@@ -28,7 +27,7 @@ class SetupTest:
     DATABASE_DIR = os.path.join(TEST_DIR, "database")
 
     _logging_inited = False
-    _postgresql: Optional[testing.postgresql.Postgresql] = None
+    _postgresql: testing.postgresql.Postgresql | None = None
 
     @classmethod
     def init_logging(cls):
@@ -159,7 +158,7 @@ class SetupTest:
             return {}
 
     @classmethod
-    def execute_commands(cls, commands: List[str]):
+    def execute_commands(cls, commands: list[str]):
         if not cls._postgresql:
             raise SetupTestException("Database not initialized!")
 
@@ -216,7 +215,7 @@ class SetupTest:
         validate(config_data, test_config_schema)
 
     @classmethod
-    def read_test_config(cls) -> Dict:
+    def read_test_config(cls) -> dict:
         config_file = os.path.join(cls.get_project_dir(), "mqtt-pg-logger.yaml")
         if not os.path.isfile(config_file):
             raise FileNotFoundError('test config file ({}) does not exist!'.format(config_file))

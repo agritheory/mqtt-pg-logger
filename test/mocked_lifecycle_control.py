@@ -1,5 +1,4 @@
 import time
-from typing import Optional
 
 from src.lifecycle_control import LifecycleControl, StatusNotification, LifecycleInstance
 
@@ -12,7 +11,7 @@ class MockedLifecycleInstance(LifecycleInstance):
         super().__init__()
 
         self._set = set()
-        self._ex: Optional[Exception] = None
+        self._ex: Exception | None = None
 
     def reset(self):
         super().reset()

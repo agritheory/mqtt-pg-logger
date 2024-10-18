@@ -1,9 +1,9 @@
+import asyncio
 import datetime
 import logging
 import threading
 import time
 from collections import deque
-from typing import List
 
 from tzlocal import get_localzone
 
@@ -41,8 +41,13 @@ class ProxyStore(threading.Thread):
         self._last_error_text = None
 
         # configuration
-        self._batch_size = min(config.get(DatabaseConfKey.BATCH_SIZE, self.DEFAULT_BATCH_SIZE), 10000)
-        self._wait_max_seconds = min(config.get(DatabaseConfKey.WAIT_MAX_SECONDS, self.DEFAULT_WAIT_MAX_SECONDS), 60)
+        self._batch_size = min(
+            config.get(DatabaseConfKey.BATCH_SIZE, self.DEFAULT_BATCH_SIZE), 10000
+        )
+        self._wait_max_seconds = min(
+            config.get(DatabaseConfKey.WAIT_MAX_SECONDS, self.DEFAULT_WAIT_MAX_SECONDS),
+            60,
+        )
 
         super().start()
 
@@ -54,7 +59,7 @@ class ProxyStore(threading.Thread):
         with self._lock:
             return bool(self._closing)
 
-    def queue(self, messages: List[Message], write_immediately=False):
+    def queue(self, messages: list[Message], write_immediately=False):
         added = 0
         lost_messages = None
 
@@ -70,11 +75,15 @@ class ProxyStore(threading.Thread):
                 added += 1
 
         if lost_messages is not None:
-            _logger.error("message queue limit (%d) reached => lost %d messages!", self.QUEUE_LIMIT, lost_messages)
+            _logger.error(
+                "message queue limit (%d) reached => lost %d messages!",
+                self.QUEUE_LIMIT,
+                lost_messages,
+            )
 
-    def _close_connection(self):
+    async def _close_connection(self):
         try:
-            self._message_store.close()
+            await self._message_store.close()
         except Exception as ex:
             _logger.exception(ex)
 
@@ -88,20 +97,26 @@ class ProxyStore(threading.Thread):
             while not self._is_closing():
                 busy = False
 
-                if self._check_connection():
+                conn_task = asyncio.create_task(self._check_connection())
+                if conn_task.result():
                     busy = True
                 if self._should_store_messages():
-                    if self._store_messages():
-                        busy = True
+                    asyncio.create_task(self._store_messages())
+                    # TODO: only set busy if messages need to be stored
+                    busy = True
                 if not busy:
                     if self._clean_up():
                         busy = True
 
                 if self._message_store.last_connect_time is not None:
-                    diff_seconds = (self._now() - self._message_store.last_connect_time).total_seconds()
+                    diff_seconds = (
+                        self._now() - self._message_store.last_connect_time
+                    ).total_seconds()
                     if diff_seconds > self.RECONNECT_AFTER_SECONDS:
-                        _logger.debug(f"automatically closing connection after {self.RECONNECT_AFTER_SECONDS}s.")
-                        self._close_connection()
+                        _logger.debug(
+                            f"automatically closing connection after {self.RECONNECT_AFTER_SECONDS}s."
+                        )
+                        asyncio.create_task(self._close_connection())
                         busy = True
 
                 time.sleep(step_time / 100 if busy else step_time)
@@ -111,14 +126,14 @@ class ProxyStore(threading.Thread):
             _logger.exception(ex)
             self.close()
         finally:
-            self._close_connection()
+            asyncio.create_task(self._close_connection())
 
-    def _check_connection(self) -> bool:
+    async def _check_connection(self) -> bool:
         """Separated to mock and test without threads"""
 
         if self._message_store.is_connected:
             return False
-        self._message_store.connect()
+        await self._message_store.connect()
         return True
 
     def _clean_up(self):
@@ -139,13 +154,15 @@ class ProxyStore(threading.Thread):
         if message_count >= self._batch_size:
             return True
 
-        diff_seconds = (self._now() - self._message_store.last_store_time).total_seconds()
+        diff_seconds = (
+            self._now() - self._message_store.last_store_time
+        ).total_seconds()
         if diff_seconds > self._wait_max_seconds:
             return True
 
         return False
 
-    def _store_messages(self) -> bool:
+    async def _store_messages(self) -> bool:
         messages = []
 
         with self._lock:
@@ -158,19 +175,26 @@ class ProxyStore(threading.Thread):
                     break
 
         if messages:
-            self._message_store.store(messages)
+            await self._message_store.store(messages)
 
         self._last_error_text = None
 
         return bool(messages)
 
     def _should_clean_up_items(self) -> bool:
-        seconds_clean_up = (self._now() - self._message_store.last_clean_up_time).total_seconds()
+        seconds_clean_up = (
+            self._now() - self._message_store.last_clean_up_time
+        ).total_seconds()
         if seconds_clean_up >= self.FORCE_CLEAN_UP_AFTER_SECONDS:
             return True
 
-        if len(self._messages) == 0 and seconds_clean_up > self.LAZY_CLEAN_UP_AFTER_SECONDS:
-            seconds_since_last_store = (self._now() - self._message_store.last_store_time).total_seconds()
+        if (
+            len(self._messages) == 0
+            and seconds_clean_up > self.LAZY_CLEAN_UP_AFTER_SECONDS
+        ):
+            seconds_since_last_store = (
+                self._now() - self._message_store.last_store_time
+            ).total_seconds()
             return bool(seconds_since_last_store > 1)
 
         return False

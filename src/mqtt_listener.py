@@ -1,6 +1,5 @@
 import logging
 import re
-from typing import List, Set
 
 import paho.mqtt.client as mqtt
 
@@ -18,7 +17,7 @@ class MqttListener(MqttClient):
 
         self._subscriptions = set()
         self._skip_subscription_regexes = []
-        self._messages: List[Message] = []
+        self._messages: list[Message] = []
 
         self._status_received_message_count = 0
         self._status_skipped_message_count = 0
@@ -80,14 +79,14 @@ class MqttListener(MqttClient):
         return self._subscribed
 
     @classmethod
-    def list_to_set(cls, items: List[str]) -> Set[str]:
+    def list_to_set(cls, items: list[str]) -> set[str]:
         items_set = set()
         if items:
             for item in items:
                 items_set.add(item)
         return items_set
 
-    def get_messages(self) -> List[Message]:
+    def get_messages(self) -> list[Message]:
         with self._lock:
             messages = self._messages
             self._messages = []

@@ -3,7 +3,6 @@ import os
 import threading
 import time
 import unittest
-from typing import Optional
 from unittest import mock
 
 import attr
@@ -21,7 +20,7 @@ from test.setup_test import SetupTest
 @attr.s
 class Subscription:
     topic: str = attr.ib()
-    subscription: Optional[str] = attr.ib()
+    subscription: str | None = attr.ib()
     skip: bool = attr.ib()
 
 

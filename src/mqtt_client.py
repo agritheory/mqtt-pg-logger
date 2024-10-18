@@ -1,7 +1,6 @@
 import datetime
 import logging
 import threading
-from typing import Optional
 
 import paho.mqtt.client as mqtt
 from tzlocal import get_localzone
@@ -103,7 +102,7 @@ class MqttClient:
 
         self._client = None
         self._is_connected = False
-        self._connection_error_info: Optional[str] = None
+        self._connection_error_info: str | None = None
         self._subscribed = False
         self._shutdown = False
 

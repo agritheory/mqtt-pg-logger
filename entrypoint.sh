@@ -17,4 +17,5 @@ sed -i -e "s#<your[_ ]broker>#${MQTT_HOST}#g" \
 
 cat mqtt-pg-logger.yaml
 
+sh ./mqtt-pg-logger.sh --create --print-logs --config-file ./mqtt-pg-logger.yaml
 sh ./mqtt-pg-logger.sh --print-logs --config-file ./mqtt-pg-logger.yaml

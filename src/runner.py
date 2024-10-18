@@ -11,12 +11,9 @@ _logger = logging.getLogger(__name__)
 
 
 class Runner:
-
     def __init__(self, app_config: AppConfig):
         self._shutdown = False
-
         self._store = ProxyStore(app_config.get_database_config())
-
         self._mqtt = MqttListener(app_config.get_mqtt_config())
         self._mqtt.connect()
 

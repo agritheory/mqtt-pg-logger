@@ -1,9 +1,8 @@
 import abc
 import datetime
 import logging
-from typing import Optional
 
-import psycopg
+import asyncpg
 from tzlocal import get_localzone
 
 
@@ -27,25 +26,54 @@ class DatabaseConfKey:
 DATABASE_JSONSCHEMA = {
     "type": "object",
     "properties": {
-        DatabaseConfKey.HOST: {"type": "string", "minLength": 1, "description": "Database host"},
-        DatabaseConfKey.PORT: {"type": "integer", "minimum": 1, "description": "Database port"},
-        DatabaseConfKey.USER: {"type": "string", "minLength": 1, "description": "Database user"},
-        DatabaseConfKey.PASSWORD: {"type": "string", "minLength": 1, "description": "Database password"},
-        DatabaseConfKey.DATABASE: {"type": "string", "minLength": 1, "description": "Database name"},
-        DatabaseConfKey.TABLE_NAME: {"type": "string", "minLength": 1, "description": "Database table "},
-        DatabaseConfKey.TIMEZONE: {"type": "string", "minLength": 1, "description": "Predefined session timezone"},
-
+        DatabaseConfKey.HOST: {
+            "type": "string",
+            "minLength": 1,
+            "description": "Database host",
+        },
+        DatabaseConfKey.PORT: {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Database port",
+        },
+        DatabaseConfKey.USER: {
+            "type": "string",
+            "minLength": 1,
+            "description": "Database user",
+        },
+        DatabaseConfKey.PASSWORD: {
+            "type": "string",
+            "minLength": 1,
+            "description": "Database password",
+        },
+        DatabaseConfKey.DATABASE: {
+            "type": "string",
+            "minLength": 1,
+            "description": "Database name",
+        },
+        DatabaseConfKey.TABLE_NAME: {
+            "type": "string",
+            "minLength": 1,
+            "description": "Database table ",
+        },
+        DatabaseConfKey.TIMEZONE: {
+            "type": "string",
+            "minLength": 1,
+            "description": "Predefined session timezone",
+        },
         DatabaseConfKey.BATCH_SIZE: {
-            "type": "integer", "minimum": 1,
-            "description": "Database batch size: message are queued until batch size is reached"
+            "type": "integer",
+            "minimum": 1,
+            "description": "Database batch size: message are queued until batch size is reached",
         },
         DatabaseConfKey.WAIT_MAX_SECONDS: {
-            "type": "integer", "minimum": 0,
-            "description": "Wait (seconds) Queued messages are stored into database even the batch size is not reached."
+            "type": "integer",
+            "minimum": 0,
+            "description": "Wait (seconds) Queued messages are stored into database even the batch size is not reached.",
         },
         DatabaseConfKey.CLEAN_UP_AFTER_DAYS: {
             "type": "integer",
-            "description": "Delete entries older than <n> days. Deactivate clean up with values values <= 0."
+            "description": "Delete entries older than <n> days. Deactivate clean up with values values <= 0.",
         },
     },
     "additionalProperties": False,
@@ -58,76 +86,52 @@ class DatabaseException(Exception):
 
 
 class Database(abc.ABC):
-
     DEFAULT_TABLE_NAME = "journal"
 
     def __init__(self, config):
-        # runtime properties
-        self._connection = None
-        self._auto_commit = False
-        self._last_connect_time: Optional[datetime.datetime] = None
-
-        # configuration
-        self._connect_data = {
-            "host": config[DatabaseConfKey.HOST],
-            "port": config[DatabaseConfKey.PORT],
-            "user": config[DatabaseConfKey.USER],
-            "password": config.get(DatabaseConfKey.PASSWORD),
-            "dbname": config[DatabaseConfKey.DATABASE],
-        }
-
-        self._table_name = config.get(DatabaseConfKey.TABLE_NAME, self.DEFAULT_TABLE_NAME)  # define by SQL scripts
-        self._timezone = config.get(DatabaseConfKey.TIMEZONE)
-
-    def __enter__(self):
-        self.connect()
-        return self
-
-    def __exit__(self, *args):
-        self.close()
-
-    def __del__(self):
-        self.close()
+        self._config = config
+        self._last_connect_time: datetime.datetime | None = None
+        self._pool: asyncpg.Pool | None = None
+        self._table_name: str = config.get(
+            DatabaseConfKey.TABLE_NAME, self.DEFAULT_TABLE_NAME
+        )  # define by SQL scripts
+        self._timezone: str | None = config.get(DatabaseConfKey.TIMEZONE)
 
     @property
-    def is_connected(self):
-        return bool(self._connection)
+    def is_connected(self) -> bool:
+        if not self._pool:
+            return False
+        return not bool(self._pool.is_closing())
 
-    def connect(self):
-        if self._connection:
-            self._connection.close()
-
-        try:
-            self._connection = psycopg.connect(**self._connect_data, autocommit=self._auto_commit)
-
-            with self._connection.cursor() as cursor:
-                time_zone = self._timezone if self._timezone else self.get_default_time_zone_name()
-                stmt = "set timezone='{}'".format(time_zone)
-                try:
-                    cursor.execute(stmt)
-                except Exception:
-                    _logger.error("setting timezone failed (%s)!", stmt)
-                    raise
+    async def connect(self):
+        self._pool = await asyncpg.create_pool(**self._config)
+        async with self._pool.acquire() as connection:
+            time_zone = self._timezone or self.get_default_time_zone_name()
+            query = f"set timezone='{time_zone}'"
+            try:
+                await connection.execute(query)
+            except Exception:
+                _logger.error(f"setting timezone failed ({query})!")
+                raise
 
             self._last_connect_time = self._now()
 
-        except psycopg.OperationalError as ex:
-            raise DatabaseException(str(ex)) from ex
-
-    def close(self):
+    async def close(self):
         try:
-            if self._connection:
-                self._connection.close()
+            if self._pool:
+                await self._pool.close()
         except Exception as ex:
             _logger.exception(ex)
         finally:
-            self._connection = None
+            self._pool = None
 
     @classmethod
     def get_default_time_zone_name(cls):
         local_timezone = get_localzone()
         if not local_timezone:
-            local_timezone = datetime.datetime.now(datetime.timezone.utc).astimezone().tzinfo
+            local_timezone = (
+                datetime.datetime.now(datetime.timezone.utc).astimezone().tzinfo
+            )
         return str(local_timezone)
 
     @classmethod
