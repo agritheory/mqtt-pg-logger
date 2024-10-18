@@ -1,6 +1,7 @@
 import logging
 import time
 
+from src.app_config import AppConfig
 from src.lifecycle_control import LifecycleControl, StatusNotification
 from src.mqtt_listener import MqttListener
 from src.proxy_store import ProxyStore
@@ -11,7 +12,7 @@ _logger = logging.getLogger(__name__)
 
 class Runner:
 
-    def __init__(self, app_config):
+    def __init__(self, app_config: AppConfig):
         self._shutdown = False
 
         self._store = ProxyStore(app_config.get_database_config())

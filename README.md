@@ -8,31 +8,30 @@ Collects [MQTT](https://en.wikipedia.org/wiki/MQTT) messages and stores them in 
 
 ## Docker
 
-### Quickstart 
+### Quickstart
 
-```docker-compose up```
+```docker compose up```
 
-### Configuration 
-The docker-compose file is setup to run 
+### Configuration
+The docker compose file is setup to run
 - mqtt-pg-logger
 - ActiveMQ Artemis
-- TimescaleDB 
+- TimescaleDB
 
-All configuration is done via env vars in the docker-compose file, and default configuration is setup to just work out of the box. 
+All configuration is done via env vars in the docker compose file, and default configuration is setup to just work out of the box.
 
-**Ports** 
-- `8161` - Artemis Web UI 
-- `616161` - Artemis main messaging port, accepts all protocols 
+**Ports**
+- `8161` - Artemis Web UI
+- `616161` - Artemis main messaging port, accepts all protocols
 - `1883` - Artemis MQTT port
 
-### Development 
-When developing mqtt-pg-logger code make sure to rebuild the docker image after making code changes if everything is running in docker. 
+### Development
+When developing mqtt-pg-logger code make sure to rebuild the docker image after making code changes if everything is running in docker.
 
 ```
-docker-compose build mqtt-pg-logger
-docker-compose down 
-docker-compose up
-``` 
+docker compose build mqtt-pg-logger
+docker compose up
+```
 
 ## Manual
 
