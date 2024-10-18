@@ -6,8 +6,35 @@ Collects [MQTT](https://en.wikipedia.org/wiki/MQTT) messages and stores them in 
 - Provides the message payload as standard VARCHAR text and additionally converts the payload into a JSONB column if compatible. (See: [trigger.sql](./sql/trigger.sql) and [convert.sql](./sql/convert.sql))
 - Clean up old messages (after x days).
 
+## Docker
 
-## Startup
+### Quickstart 
+
+```docker-compose up```
+
+### Configuration 
+The docker-compose file is setup to run 
+- mqtt-pg-logger
+- ActiveMQ Artemis
+- TimescaleDB 
+
+All configuration is done via env vars in the docker-compose file, and default configuration is setup to just work out of the box. 
+
+**Ports** 
+- `8161` - Artemis Web UI 
+- `616161` - Artemis main messaging port, accepts all protocols 
+- `1883` - Artemis MQTT port
+
+### Development 
+When developing mqtt-pg-logger code make sure to rebuild the docker image after making code changes if everything is running in docker. 
+
+```
+docker-compose build mqtt-pg-logger
+docker-compose down 
+docker-compose up
+``` 
+
+## Manual
 
 ### Prerequisites
 

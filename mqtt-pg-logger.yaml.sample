@@ -7,13 +7,17 @@ mqtt:
     client_id:                  "mqtt-pg-logger-1234"
     host:                       "<your_broker>"
     port:                       1883
+    user:                       "<your_mqtt_user>"
+    password:                   "<your_mqtt_password>"
+    ssl_ca_certs:               "<path_to_your_ca_cert>"
+    ssl_insecure:               True
     protocol:                   4  # 3==MQTTv31 (default), 4==MQTTv311, 5==default/MQTTv5,
     # filter_message_id_0:      True
     subscriptions:              ["smarthome/#", "smarthome2/#"]  # topics
     skip_subscription_regexes:  []  # regex for topics
 
 database:
-    host:                       "localhost"
+    host:                       "<your database host>"
     port:                       5432
     user:                       "<your database user>"
     password:                   "<your database password>"
