@@ -1,7 +1,7 @@
 import unittest
+from test.setup_test import SetupTest
 
 from src.database_utils import DatabaseUtils
-from test.setup_test import SetupTest
 
 
 class TestDatabaseUtils(unittest.TestCase):
@@ -22,7 +22,7 @@ class TestDatabaseUtils(unittest.TestCase):
         ]
 
         script_path = SetupTest.get_test_path("temp.sql")
-        with open(script_path, 'w') as f:
+        with open(script_path, "w") as f:
             f.write("\n".join(lines))
 
         commands = DatabaseUtils.load_commands(script_path)

@@ -4,7 +4,6 @@ import os
 from src.database import Database
 from src.database_utils import DatabaseUtils
 
-
 _logger = logging.getLogger(__name__)
 
 

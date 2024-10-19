@@ -5,7 +5,6 @@ import logging
 import asyncpg
 from tzlocal import get_localzone
 
-
 _logger = logging.getLogger(__name__)
 
 
@@ -129,9 +128,7 @@ class Database(abc.ABC):
     def get_default_time_zone_name(cls):
         local_timezone = get_localzone()
         if not local_timezone:
-            local_timezone = (
-                datetime.datetime.now(datetime.timezone.utc).astimezone().tzinfo
-            )
+            local_timezone = datetime.datetime.now(datetime.UTC).astimezone().tzinfo
         return str(local_timezone)
 
     @classmethod

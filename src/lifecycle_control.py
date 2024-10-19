@@ -4,7 +4,6 @@ import threading
 import time
 from enum import Enum
 
-
 _logger = logging.getLogger(__name__)
 
 
@@ -56,7 +55,6 @@ class LifecycleInstance:
 
     def notify(self, status: StatusNotification):
         """Overwritten in test by a mock"""
-        pass
 
     # noinspection
     def sleep(self, seconds: float) -> float:

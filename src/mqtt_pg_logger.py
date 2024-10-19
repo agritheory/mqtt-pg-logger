@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 import asyncio
-from functools import wraps
 import logging
 import sys
+from functools import wraps
 
 import click
 
 from src.app_config import AppConfig
-from src.app_logging import AppLogging, LOGGING_CHOICES
+from src.app_logging import LOGGING_CHOICES, AppLogging
 from src.runner import Runner
 from src.schema_creator import SchemaCreator
-
 
 _logger = logging.getLogger(__name__)
 

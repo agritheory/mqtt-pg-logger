@@ -10,7 +10,7 @@ import yaml
 from jsonschema import validate
 from psycopg.rows import dict_row
 
-from src.mqtt_client import MqttConfKey, MQTT_JSONSCHEMA
+from src.mqtt_client import MQTT_JSONSCHEMA, MqttConfKey
 from src.schema_creator import SchemaCreator
 
 
@@ -35,9 +35,9 @@ class SetupTest:
             cls._logging_inited = True
 
             logging.basicConfig(
-                format='[%(levelname)8s] %(name)s: %(message)s',
+                format="[%(levelname)8s] %(name)s: %(message)s",
                 level=logging.DEBUG,
-                handlers=[logging.StreamHandler(sys.stdout)]
+                handlers=[logging.StreamHandler(sys.stdout)],
             )
 
     @classmethod
@@ -162,7 +162,9 @@ class SetupTest:
         if not cls._postgresql:
             raise SetupTestException("Database not initialized!")
 
-        with psycopg.connect(**SetupTest.get_database_params(psycopg_naming=True)) as connection:
+        with psycopg.connect(
+            **SetupTest.get_database_params(psycopg_naming=True)
+        ) as connection:
             with connection.cursor() as cursor:
                 for command in commands:
                     try:
@@ -176,7 +178,9 @@ class SetupTest:
         if not cls._postgresql:
             raise SetupTestException("Database not initialized!")
 
-        with psycopg.connect(**SetupTest.get_database_params(psycopg_naming=True)) as connection:
+        with psycopg.connect(
+            **SetupTest.get_database_params(psycopg_naming=True)
+        ) as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(query)
                 return cursor.fetchone()
@@ -186,7 +190,9 @@ class SetupTest:
         if not cls._postgresql:
             raise SetupTestException("Database not initialized!")
 
-        with psycopg.connect(**SetupTest.get_database_params(psycopg_naming=True)) as connection:
+        with psycopg.connect(
+            **SetupTest.get_database_params(psycopg_naming=True)
+        ) as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(query)
                 return cursor.fetchall()
@@ -196,7 +202,10 @@ class SetupTest:
         mqtt_schema = copy.deepcopy(MQTT_JSONSCHEMA)
         schema_requires = mqtt_schema["required"]
 
-        for prop_name in [MqttConfKey.SUBSCRIPTIONS, MqttConfKey.SKIP_SUBSCRIPTION_REGEXES]:
+        for prop_name in [
+            MqttConfKey.SUBSCRIPTIONS,
+            MqttConfKey.SKIP_SUBSCRIPTION_REGEXES,
+        ]:
             if prop_name in schema_requires:
                 schema_requires.remove(prop_name)
 
@@ -218,8 +227,8 @@ class SetupTest:
     def read_test_config(cls) -> dict:
         config_file = os.path.join(cls.get_project_dir(), "mqtt-pg-logger.yaml")
         if not os.path.isfile(config_file):
-            raise FileNotFoundError('test config file ({}) does not exist!'.format(config_file))
-        with open(config_file, 'r') as stream:
+            raise FileNotFoundError(f"test config file ({config_file}) does not exist!")
+        with open(config_file) as stream:
             config_data = yaml.unsafe_load(stream)
 
         cls.valdate_test_config_file(config_data)

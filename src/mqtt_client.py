@@ -5,7 +5,6 @@ import threading
 import paho.mqtt.client as mqtt
 from tzlocal import get_localzone
 
-
 _logger = logging.getLogger(__name__)
 
 
@@ -62,12 +61,10 @@ MQTT_JSONSCHEMA = {
         MqttConfKey.SSL_KEYFILE: {"type": "string", "minLength": 1},
         MqttConfKey.USER: {"type": "string", "minLength": 1},
         MqttConfKey.PASSWORD: {"type": "string"},
-
         MqttConfKey.FILTER_MESSAGE_ID_0: {
             "type": "boolean",
             "description": "Filter all messages with Message ID 0. Default: False. '0' is reserved as an invalid Message ID.",
         },
-
         MqttConfKey.SUBSCRIPTIONS: SUBSCRIPTION_JSONSCHEMA,
         MqttConfKey.SKIP_SUBSCRIPTION_REGEXES: SKIP_SUBSCRIPTION_JSONSCHEMA,
         MqttConfKey.TEST_SUBSCRIPTION_BASE: {
@@ -75,7 +72,7 @@ MQTT_JSONSCHEMA = {
             "minLength": 1,
             "description": "For test only: base topic (get extended)",
             # "pattern": "[A-Za-z\/]*",  # no "#" at end
-        }
+        },
     },
     "additionalProperties": False,
     "required": [MqttConfKey.HOST, MqttConfKey.PORT, MqttConfKey.SUBSCRIPTIONS],
@@ -127,12 +124,16 @@ class MqttClient:
             self._port = self.DEFAULT_PORT_SSL if is_ssl else self.DEFAULT_PORT
 
         if not self._host or not subscriptions:
-            raise ValueError("mandatory mqtt configuration not found ({}, {})'!".format(MqttConfKey.HOST, MqttConfKey.SUBSCRIPTIONS))
+            raise ValueError(
+                f"mandatory mqtt configuration not found ({MqttConfKey.HOST}, {MqttConfKey.SUBSCRIPTIONS})'!"
+            )
 
         self._client = mqtt.Client(client_id=client_id, protocol=protocol)
 
         if is_ssl:
-            self._client.tls_set(ca_certs=ssl_ca_certs, certfile=ssl_certfile, keyfile=ssl_keyfile)
+            self._client.tls_set(
+                ca_certs=ssl_ca_certs, certfile=ssl_certfile, keyfile=ssl_keyfile
+            )
             if ssl_insecure:
                 _logger.info("disabling SSL certificate verification")
                 self._client.tls_insecure_set(True)
@@ -153,7 +154,9 @@ class MqttClient:
             return self._is_connected
 
     def connect(self):
-        self._client.connect_async(self._host, port=self._port, keepalive=self._keepalive)
+        self._client.connect_async(
+            self._host, port=self._port, keepalive=self._keepalive
+        )
         self._client.loop_start()
         _logger.debug("%s is connecting...", self.__class__.__name__)
 
@@ -176,7 +179,9 @@ class MqttClient:
             connection_error_info = self._connection_error_info
 
         if connection_error_info:
-            raise MqttException(connection_error_info)  # leads to exit => restarted by systemd
+            raise MqttException(
+                connection_error_info
+            )  # leads to exit => restarted by systemd
         if not is_connected:
             raise MqttException("MQTT is not connected!")
 
@@ -188,7 +193,9 @@ class MqttClient:
                 self._is_connected = True
             _logger.debug("%s was connected.", class_name)
         else:
-            connection_error_info = f"{class_name} connection failed (#{rc}: {mqtt.error_string(rc)})!"
+            connection_error_info = (
+                f"{class_name} connection failed (#{rc}: {mqtt.error_string(rc)})!"
+            )
             _logger.error(connection_error_info)
             with self._lock:
                 self._is_connected = False
@@ -209,7 +216,11 @@ class MqttClient:
         if rc == 0:
             _logger.debug("%s was disconnected.", class_name)
         else:
-            _logger.error("%s was unexpectedly disconnected: %s", class_name, connection_error_info or "???")
+            _logger.error(
+                "%s was unexpectedly disconnected: %s",
+                class_name,
+                connection_error_info or "???",
+            )
 
     def _on_message(self, _mqtt_client, _userdata, mqtt_message: mqtt.MQTTMessage):
         """MQTT callback when a message is received from MQTT server"""

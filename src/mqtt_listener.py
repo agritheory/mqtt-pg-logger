@@ -5,7 +5,7 @@ import paho.mqtt.client as mqtt
 
 from src.lifecycle_control import LifecycleControl, StatusNotification
 from src.message import Message
-from src.mqtt_client import MqttConfKey, MqttClient, MqttException
+from src.mqtt_client import MqttClient, MqttConfKey, MqttException
 
 _logger = logging.getLogger(__name__)
 
@@ -26,10 +26,14 @@ class MqttListener(MqttClient):
         # MQTT V3 Protocol Specification: Do not use Message ID 0. It is reserved as an invalid Message ID.
         self._filter_message_id_0 = config.get(MqttConfKey.FILTER_MESSAGE_ID_0, False)
 
-        skip_subscription_regexes = self.list_to_set(config.get(MqttConfKey.SKIP_SUBSCRIPTION_REGEXES))
+        skip_subscription_regexes = self.list_to_set(
+            config.get(MqttConfKey.SKIP_SUBSCRIPTION_REGEXES)
+        )
         for skip_subscription_regex in skip_subscription_regexes:
             if skip_subscription_regex:
-                self._skip_subscription_regexes.append(re.compile(skip_subscription_regex))
+                self._skip_subscription_regexes.append(
+                    re.compile(skip_subscription_regex)
+                )
 
         subscriptions = config.get(MqttConfKey.SUBSCRIPTIONS)
         self._subscriptions = self.list_to_set(subscriptions)
@@ -53,7 +57,9 @@ class MqttListener(MqttClient):
                     break
                 time_counter += LifecycleControl.sleep(time_step)
                 if time_counter > 15:
-                    raise MqttException("couldn't subscribe to MQTT topics... no connection?!")
+                    raise MqttException(
+                        "couldn't subscribe to MQTT topics... no connection?!"
+                    )
 
         except Exception:
             self._subscribed = False
@@ -69,8 +75,10 @@ class MqttListener(MqttClient):
                 subscriptions = [(s, subs_qos) for s in channels]
                 result, dummy = self._client.subscribe(subscriptions)
                 if result != mqtt.MQTT_ERR_SUCCESS:
-                    error_info = "{} (#{})".format(mqtt.error_string(result), result)
-                    raise MqttException(f"could not subscribe to MQTT topics): {error_info}; topics: {channels}")
+                    error_info = f"{mqtt.error_string(result)} (#{result})"
+                    raise MqttException(
+                        f"could not subscribe to MQTT topics): {error_info}; topics: {channels}"
+                    )
 
                 self._subscribed = True
                 LifecycleControl.notify(StatusNotification.MQTT_LISTENER_SUBSCRIBED)
@@ -119,14 +127,21 @@ class MqttListener(MqttClient):
                     self._status_skipped_message_count += 0 if accept_message else 1
                     status_last_log = self._status_last_log
 
-                if _logger.isEnabledFor(logging.INFO) and (self._now() - status_last_log).total_seconds() > 300:
+                if (
+                    _logger.isEnabledFor(logging.INFO)
+                    and (self._now() - status_last_log).total_seconds() > 300
+                ):
                     with self._lock:
                         received_count = self._status_received_message_count
                         skipped_count = self._status_skipped_message_count
                         self._status_last_log = self._now()
 
                     if skipped_count > 0:
-                        _logger.info("overall messages: received=%d; skipped=%d", received_count, skipped_count)
+                        _logger.info(
+                            "overall messages: received=%d; skipped=%d",
+                            received_count,
+                            skipped_count,
+                        )
                     else:
                         _logger.info("overall messages: received=%d", received_count)
 

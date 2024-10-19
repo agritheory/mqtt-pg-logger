@@ -1,8 +1,8 @@
 import os
 import unittest
+from test.setup_test import SetupTest
 
 from src.app_config import AppConfig
-from test.setup_test import SetupTest
 
 
 class TestAppConfig(unittest.TestCase):
@@ -16,7 +16,7 @@ class TestAppConfig(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             AppConfig.check_config_file_access(config_file)
 
-        with open(config_file, 'w') as f:
+        with open(config_file, "w") as f:
             f.write("dummy config file for file access test.. no yaml needed.")
 
         os.chmod(config_file, 0o677)

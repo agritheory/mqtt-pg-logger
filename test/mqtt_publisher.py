@@ -18,13 +18,12 @@ class MqttPublisher(MqttClient):
                 return
 
             if not self._is_connected or self._connection_error_info:
-                raise MqttException(self._connection_error_info or "MQTT is not connected!")
+                raise MqttException(
+                    self._connection_error_info or "MQTT is not connected!"
+                )
 
             return self._client.publish(
-                topic=topic,
-                payload=payload,
-                qos=2,
-                retain=False
+                topic=topic, payload=payload, qos=2, retain=False
             )
 
     @classmethod

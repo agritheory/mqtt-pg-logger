@@ -11,7 +11,6 @@ from src.database import DatabaseConfKey
 from src.message import Message
 from src.message_store import MessageStore
 
-
 _logger = logging.getLogger(__name__)
 
 

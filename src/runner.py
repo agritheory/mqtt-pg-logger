@@ -6,7 +6,6 @@ from src.lifecycle_control import LifecycleControl, StatusNotification
 from src.mqtt_listener import MqttListener
 from src.proxy_store import ProxyStore
 
-
 _logger = logging.getLogger(__name__)
 
 
@@ -20,29 +19,29 @@ class Runner:
     def loop(self):
         """endless loop"""
         time_step = 0.05
-        there_has_been_messages_to_notify = False
+        has_messages_to_notify = False
 
         try:
             while LifecycleControl.should_proceed():
-
                 if not self._store.is_alive():
                     raise RuntimeError("database thread was finished! abort.")
 
                 messages = self._mqtt.get_messages()
                 if messages:
-                    there_has_been_messages_to_notify = True
+                    has_messages_to_notify = True
                     self._store.queue(messages)
 
                 if len(messages) == 0:
                     # not busy
                     self._mqtt.ensure_connection()
 
-                    if there_has_been_messages_to_notify:
-                        there_has_been_messages_to_notify = False
-                        LifecycleControl.notify(StatusNotification.RUNNER_QUEUE_EMPTIED)  # test related
+                    if has_messages_to_notify:
+                        has_messages_to_notify = False
+                        LifecycleControl.notify(
+                            StatusNotification.RUNNER_QUEUE_EMPTIED
+                        )  # test related
 
                     time.sleep(time_step)
-
         except KeyboardInterrupt:
             # gets called without signal-handler
             _logger.debug("finishing...")

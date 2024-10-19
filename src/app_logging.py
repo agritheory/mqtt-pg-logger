@@ -1,8 +1,7 @@
 import logging
+import logging.handlers
 import os
 import sys
-import logging.handlers
-
 
 LOGGING_DEFAULT_LOG_LEVEL = "info"
 LOGGING_CHOICES = ["debug", "info", "warning", "error"]
@@ -11,10 +10,26 @@ LOGGING_CHOICES = ["debug", "info", "warning", "error"]
 LOGGING_JSONSCHEMA = {
     "type": "object",
     "properties": {
-        "log_file": {"type": "string", "minLength": 1, "description": "Log file (path)"},
-        "log_level": {"type": "string", "enum": LOGGING_CHOICES, "description": "Log level"},
-        "max_bytes": {"type": "integer", "minimum": 102400, "description": "Max bytes per log files."},
-        "max_count": {"type": "integer", "minimum": 1, "description": "Max count of rolled log files."},
+        "log_file": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Log file (path)",
+        },
+        "log_level": {
+            "type": "string",
+            "enum": LOGGING_CHOICES,
+            "description": "Log level",
+        },
+        "max_bytes": {
+            "type": "integer",
+            "minimum": 102400,
+            "description": "Max bytes per log files.",
+        },
+        "max_count": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Max count of rolled log files.",
+        },
     },
 }
 
@@ -37,8 +52,8 @@ class AppLogging:
         if systemd_mode is None:
             systemd_mode = config_data.get("systemd_mode", False)
 
-        format_with_ts = '%(asctime)s [%(levelname)8s] %(name)s: %(message)s'
-        format_no_ts = '[%(levelname)8s] %(name)s: %(message)s'
+        format_with_ts = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
+        format_no_ts = "[%(levelname)8s] %(name)s: %(message)s"
 
         if log_file:
             log_dir = os.path.dirname(log_file)
@@ -48,9 +63,7 @@ class AppLogging:
             max_bytes = config_data.get("max_bytes", 1048576)
             max_count = config_data.get("max_count", 5)
             handler = logging.handlers.RotatingFileHandler(
-                log_file,
-                maxBytes=int(max_bytes),
-                backupCount=int(max_count)
+                log_file, maxBytes=int(max_bytes), backupCount=int(max_count)
             )
             formatter = logging.Formatter(format_with_ts)
             handler.setFormatter(formatter)
@@ -64,11 +77,7 @@ class AppLogging:
         if print_logs or systemd_mode:
             handlers.append(logging.StreamHandler(sys.stdout))
 
-        logging.basicConfig(
-            format=log_format,
-            level=log_level,
-            handlers=handlers
-        )
+        logging.basicConfig(format=log_format, level=log_level, handlers=handlers)
 
     @classmethod
     def parse_log_level(cls, value):
