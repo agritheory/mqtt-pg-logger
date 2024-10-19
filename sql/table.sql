@@ -3,9 +3,11 @@
 
 -- DROP TABLE pgqueuer;  -- do it manually. the automatic creation will abort/fail here.
 
+CREATE TYPE pgqueuer_status AS ENUM ('queued', 'picked');
+
 CREATE TABLE pgqueuer (
     pgqueuer_id SERIAL PRIMARY KEY,
-    id INTEGER GENERATED ALWAYS AS pgqueuer_id STORED,
+    id INTEGER GENERATED ALWAYS AS (pgqueuer_id) STORED,
     topic VARCHAR(256),
     text VARCHAR(4096),
     data JSONB,
@@ -17,7 +19,7 @@ CREATE TABLE pgqueuer (
 	updated TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
 	status pgqueuer_status NOT NULL,
 	entrypoint TEXT NOT NULL,
-    payload VARCHAR(4096), GENERATED ALWAYS AS text STORED,
+    payload VARCHAR(4096) GENERATED ALWAYS AS (text) STORED,
     time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -40,6 +42,8 @@ COMMENT ON COLUMN pgqueuer.entrypoint is 'The entrypoint function that will proc
 CREATE INDEX CONCURRENTLY pgqueuer_time_idx ON pgqueuer ( time );
 
 CREATE INDEX CONCURRENTLY pgqueuer_name_idx ON pgqueuer ( topic );
+
+CREATE TYPE pgqueuer_statistics_status AS ENUM ('exception', 'successful');
 
 CREATE TABLE pgqueuer_statistics (
 	id SERIAL PRIMARY KEY,               -- Unique identifier for each log entry.

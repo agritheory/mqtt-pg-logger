@@ -59,7 +59,7 @@ class DatabaseException(Exception):
 
 class Database(abc.ABC):
 
-    DEFAULT_TABLE_NAME = "journal"
+    DEFAULT_TABLE_NAME = "pgqueuer"
 
     def __init__(self, config):
         # runtime properties
