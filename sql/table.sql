@@ -7,7 +7,7 @@ CREATE TYPE pgqueuer_status AS ENUM ('queued', 'picked');
 
 CREATE TABLE pgqueuer (
     pgqueuer_id SERIAL PRIMARY KEY,
-    id INTEGER NOT NULL,
+    id INTEGER GENERATED ALWAYS AS (pgqueuer_id) STORED,
     topic VARCHAR(256),
     text VARCHAR(4096),
     data JSONB,
@@ -53,15 +53,6 @@ CREATE TABLE pgqueuer_statistics (
 	time_in_queue INTERVAL NOT NULL,     -- Time the job spent in the queue.
 	status pgqueuer_statistics_status NOT NULL, -- Status of the job processing (exception, successful).
 	entrypoint TEXT NOT NULL             -- The entrypoint function that processed the job.
-);
-
-CREATE TABLE journal (
-    message_id SERIAL PRIMARY KEY,
-    topic TEXT NOT NULL,
-    text TEXT NOT NULL,
-    qos INT,
-    retain BOOLEAN,
-    time TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- manual test
