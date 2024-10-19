@@ -86,14 +86,14 @@ async def run_service(
             await creator.create_schema()
         else:
             runner = Runner(app_config)
-            runner.loop()
+            await runner.loop()
     finally:
         _logger.info("shutdown")
 
         if creator is not None:
             await creator.close()
         if runner is not None:
-            runner.close()
+            await runner.close()
 
 
 if __name__ == "__main__":

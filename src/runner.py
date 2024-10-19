@@ -3,8 +3,8 @@ import time
 
 from src.app_config import AppConfig
 from src.lifecycle_control import LifecycleControl, StatusNotification
+from src.message_store import MessageStore
 from src.mqtt_listener import MqttListener
-from src.proxy_store import ProxyStore
 
 _logger = logging.getLogger(__name__)
 
@@ -12,24 +12,26 @@ _logger = logging.getLogger(__name__)
 class Runner:
     def __init__(self, app_config: AppConfig):
         self._shutdown = False
-        self._store = ProxyStore(app_config.get_database_config())
+        self._store = MessageStore(app_config.get_database_config())
         self._mqtt = MqttListener(app_config.get_mqtt_config())
         self._mqtt.connect()
 
-    def loop(self):
+    async def loop(self):
         """endless loop"""
         time_step = 0.05
         has_messages_to_notify = False
 
+        await self._store.connect()
+
         try:
             while LifecycleControl.should_proceed():
-                if not self._store.is_alive():
-                    raise RuntimeError("database thread was finished! abort.")
+                # if not self._store.is_alive():
+                #     raise RuntimeError("database thread was finished! abort.")
 
                 messages = self._mqtt.get_messages()
                 if messages:
                     has_messages_to_notify = True
-                    self._store.queue(messages)
+                    await self._store.queue(messages)
 
                 if len(messages) == 0:
                     # not busy
@@ -46,10 +48,10 @@ class Runner:
             # gets called without signal-handler
             _logger.debug("finishing...")
 
-    def close(self):
+    async def close(self):
         if self._mqtt is not None:
             self._mqtt.close()
             self._mqtt = None
         if self._store is not None:
-            self._store.close()
+            await self._store.close()
             self._store = None

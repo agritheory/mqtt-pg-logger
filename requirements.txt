@@ -5,6 +5,6 @@ jsonschema == 4.17.3
 paho-mqtt == 1.6.1
 psycopg[binary] == 3.2.3
 pyyaml
-tzlocal == 4.2
+tzlocal == 5.2
 unsync == 1.4.0
 wheel

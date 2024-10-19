@@ -6,6 +6,7 @@ from psycopg import sql
 
 from src.database import Database, DatabaseConfKey
 from src.lifecycle_control import LifecycleControl, StatusNotification
+from src.message import Message
 
 _logger = logging.getLogger(__name__)
 
@@ -15,6 +16,7 @@ class MessageStore(Database):
     DEFAULT_BATCH_SIZE = 100
     DEFAULT_WAIT_MAX_SECONDS = 10
     DEFAULT_CLEAN_UP_AFTER_DAYS = 14
+    QUEUE_LIMIT = 50000
 
     def __init__(self, config):
         super().__init__(config)
@@ -55,33 +57,45 @@ class MessageStore(Database):
     def last_store_time(self) -> datetime.datetime | None:
         return self._last_store_time
 
-    async def store(self, messages):
-        if not messages:
+    async def store(self, message):
+        if not message:
             return
 
         columns = ["topic", "text", "qos", "retain", "time"]
-        records = tuple((m.topic, m.text, m.qos, m.retain, m.time) for m in messages)
+        records = tuple(getattr(message, column) for column in columns)
 
         async with self._pool.acquire() as connection:
-            asyncio.create_task(
-                connection.copy_records_to_table(
-                    self._table_name, records=records, columns=columns
-                )
+            await connection.copy_records_to_table(
+                self._table_name, records=records, columns=columns
             )
-
-            # self._status_stored_message_count += cursor_rowcount
-            # _logger.debug("%d row(s) inserted.", cursor_rowcount)
 
             if (
                 _logger.isEnabledFor(logging.INFO)
                 and (self._now() - self._status_last_log).total_seconds() > 300
             ):
                 self._status_last_log = self._now()
-                _logger.info(
-                    "overall messages: stored=%d", self._status_stored_message_count
-                )
+                _logger.info("overall message: stored=%d", message.text)
 
             LifecycleControl.notify(StatusNotification.MESSAGE_STORE_STORED)
+
+    async def queue(self, messages: list[Message]):
+        added = 0
+        lost_messages = 0
+
+        async with asyncio.Lock():
+            for message in messages:
+                if len(messages) > self.QUEUE_LIMIT:
+                    lost_messages = len(messages) - added
+                    break
+                await self.store(message)
+                added += 1
+
+        if lost_messages > 0:
+            _logger.error(
+                "message queue limit (%d) reached => lost %d messages!",
+                self.QUEUE_LIMIT,
+                lost_messages,
+            )
 
     def clean_up(self):
         if self._clean_up_after_days <= 0:

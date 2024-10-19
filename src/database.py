@@ -80,14 +80,10 @@ DATABASE_JSONSCHEMA = {
 }
 
 
-class DatabaseException(Exception):
-    pass
-
-
 class Database(abc.ABC):
     DEFAULT_TABLE_NAME = "journal"
 
-    def __init__(self, config):
+    def __init__(self, config) -> None:
         self._config = config
         self._last_connect_time: datetime.datetime | None = None
         self._pool: asyncpg.Pool | None = None
@@ -102,10 +98,22 @@ class Database(abc.ABC):
             return False
         return not bool(self._pool.is_closing())
 
-    async def connect(self):
+    @staticmethod
+    def get_default_time_zone() -> str:
+        return str(get_localzone())
+
+    @staticmethod
+    def _now() -> datetime:
+        """overwritable `datetime.now` for testing"""
+        return datetime.datetime.now(tz=get_localzone())
+
+    async def connect(self) -> None:
         self._pool = await asyncpg.create_pool(**self._config)
+        await self.set_timezone()
+
+    async def set_timezone(self) -> None:
         async with self._pool.acquire() as connection:
-            time_zone = self._timezone or self.get_default_time_zone_name()
+            time_zone = self._timezone or self.get_default_time_zone()
             query = f"set timezone='{time_zone}'"
             try:
                 await connection.execute(query)
@@ -115,7 +123,7 @@ class Database(abc.ABC):
 
             self._last_connect_time = self._now()
 
-    async def close(self):
+    async def close(self) -> None:
         try:
             if self._pool:
                 await self._pool.close()
@@ -123,15 +131,3 @@ class Database(abc.ABC):
             _logger.exception(ex)
         finally:
             self._pool = None
-
-    @classmethod
-    def get_default_time_zone_name(cls):
-        local_timezone = get_localzone()
-        if not local_timezone:
-            local_timezone = datetime.datetime.now(datetime.UTC).astimezone().tzinfo
-        return str(local_timezone)
-
-    @classmethod
-    def _now(cls) -> datetime:
-        """overwritable `datetime.now` for testing"""
-        return datetime.datetime.now(tz=get_localzone())

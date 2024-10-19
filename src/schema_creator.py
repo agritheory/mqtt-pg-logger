@@ -1,6 +1,8 @@
 import logging
 import os
 
+import asyncpg
+
 from src.database import Database
 from src.database_utils import DatabaseUtils
 
@@ -46,6 +48,12 @@ class SchemaCreator(Database):
             for command in commands:
                 try:
                     await connection.execute(command)
+                except (
+                    asyncpg.exceptions.DuplicateObjectError,
+                    asyncpg.exceptions.DuplicateTableError,
+                ) as ex:
+                    # if table already exists, skip
+                    _logger.info("db-command skipped: %s\n%s", ex, command)
                 except Exception as ex:
                     _logger.error("db-command failed: %s\n%s", ex, command)
                     raise
