@@ -57,16 +57,16 @@ class MessageStore(Database):
     def last_store_time(self) -> datetime.datetime | None:
         return self._last_store_time
 
-    async def store(self, message):
+    async def store(self, message: Message):
         if not message:
             return
 
         columns = ["topic", "text", "qos", "retain", "time"]
-        records = tuple(getattr(message, column) for column in columns)
+        record = tuple(getattr(message, column) for column in columns)
 
         async with self._pool.acquire() as connection:
             await connection.copy_records_to_table(
-                self._table_name, records=records, columns=columns
+                self._table_name, records=[record], columns=columns
             )
 
             if (

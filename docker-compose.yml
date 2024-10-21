@@ -9,6 +9,10 @@ services:
 
   mqtt-pg-logger:
     build: .
+    develop:
+      watch:
+        - action: rebuild
+          path: .
     depends_on:
       - artemis
       - timescaledb

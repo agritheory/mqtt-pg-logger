@@ -30,7 +30,7 @@ When developing mqtt-pg-logger code make sure to rebuild the docker image after 
 
 ```
 docker compose build mqtt-pg-logger
-docker compose up
+docker compose up --watch
 ```
 
 ## Manual
