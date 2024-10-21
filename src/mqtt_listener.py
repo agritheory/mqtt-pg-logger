@@ -106,11 +106,11 @@ class MqttListener(MqttClient):
         if reason_code == 0:
             LifecycleControl.notify(StatusNotification.MQTT_LISTENER_CONNECTED)
 
-    def _on_message(self, mqtt_client, userdata, mqtt_message: mqtt.MQTTMessage):
+    def _on_message(self, client, userdata, message: mqtt.MQTTMessage):
         """MQTT callback when a message is received from MQTT server"""
         try:
-            if mqtt_message is not None:
-                message = Message.create(mqtt_message)
+            if message is not None:
+                message = Message.create(message)
                 message.time = self._now()
                 _logger.debug("message received: %s", message)
 
