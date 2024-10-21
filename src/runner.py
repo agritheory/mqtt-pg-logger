@@ -7,6 +7,7 @@ from src.message_store import MessageStore
 from src.mqtt_listener import MqttListener
 
 _logger = logging.getLogger(__name__)
+logging.getLogger("asyncio").setLevel(logging.INFO)
 
 
 class Runner:

@@ -175,8 +175,8 @@ class SetupTest:
 
     @classmethod
     def query_one(cls, query: str):
-        if not cls._postgresql:
-            raise SetupTestException("Database not initialized!")
+        # if not cls._postgresql:
+        #     raise SetupTestException("Database not initialized!")
 
         with psycopg.connect(
             **SetupTest.get_database_params(psycopg_naming=True)

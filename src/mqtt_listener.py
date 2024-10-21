@@ -100,10 +100,10 @@ class MqttListener(MqttClient):
             self._messages = []
         return messages
 
-    def _on_connect(self, mqtt_client, userdata, flags, rc):
-        super()._on_connect(mqtt_client, userdata, flags, rc)
+    def _on_connect(self, client, userdata, flags, reason_code, properties):
+        super()._on_connect(client, userdata, flags, reason_code, properties)
 
-        if rc == 0:
+        if reason_code == 0:
             LifecycleControl.notify(StatusNotification.MQTT_LISTENER_CONNECTED)
 
     def _on_message(self, mqtt_client, userdata, mqtt_message: mqtt.MQTTMessage):

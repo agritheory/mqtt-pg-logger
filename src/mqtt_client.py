@@ -128,7 +128,11 @@ class MqttClient:
                 f"mandatory mqtt configuration not found ({MqttConfKey.HOST}, {MqttConfKey.SUBSCRIPTIONS})'!"
             )
 
-        self._client = mqtt.Client(client_id=client_id, protocol=protocol)
+        self._client = mqtt.Client(
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            client_id=client_id,
+            protocol=protocol,
+        )
 
         if is_ssl:
             self._client.tls_set(
@@ -185,35 +189,33 @@ class MqttClient:
         if not is_connected:
             raise MqttException("MQTT is not connected!")
 
-    def _on_connect(self, _mqtt_client, _userdata, _flags, rc):
+    def _on_connect(self, client, userdata, flags, reason_code, properties):
         """MQTT callback is called when client connects to MQTT server."""
         class_name = self.__class__.__name__
-        if rc == 0:
+        if reason_code == 0:
             with self._lock:
                 self._is_connected = True
             _logger.debug("%s was connected.", class_name)
         else:
-            connection_error_info = (
-                f"{class_name} connection failed (#{rc}: {mqtt.error_string(rc)})!"
-            )
+            connection_error_info = f"{class_name} connection failed (#{reason_code}: {mqtt.error_string(reason_code)})!"
             _logger.error(connection_error_info)
             with self._lock:
                 self._is_connected = False
                 self._connection_error_info = connection_error_info
 
-    def _on_disconnect(self, _mqtt_client, _userdata, rc):
+    def _on_disconnect(self, client, userdata, flags, reason_code, properties):
         """MQTT callback for when the client disconnects from the MQTT server."""
         class_name = self.__class__.__name__
         connection_error_info = None
-        if rc != 0:
-            connection_error_info = f"{class_name} connection was lost (#{rc}: {mqtt.error_string(rc)}) => abort => restart!"
+        if reason_code != 0:
+            connection_error_info = f"{class_name} connection was lost (#{reason_code}: {mqtt.error_string(reason_code)}) => abort => restart!"
 
         with self._lock:
             self._is_connected = False
             if connection_error_info and not self._connection_error_info:
                 self._connection_error_info = connection_error_info
 
-        if rc == 0:
+        if reason_code == 0:
             _logger.debug("%s was disconnected.", class_name)
         else:
             _logger.error(
@@ -222,10 +224,10 @@ class MqttClient:
                 connection_error_info or "???",
             )
 
-    def _on_message(self, _mqtt_client, _userdata, mqtt_message: mqtt.MQTTMessage):
+    def _on_message(self, client, userdata, message: mqtt.MQTTMessage):
         """MQTT callback when a message is received from MQTT server"""
 
-    def _on_publish(self, mqtt_client, userdata, mid):
+    def _on_publish(self, client, userdata, mid, reason_codes, properties):
         """MQTT callback is invoked when message was successfully sent to the MQTT server."""
 
     @classmethod

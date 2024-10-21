@@ -54,7 +54,7 @@ class TestMqttListenerConnectionErrors(unittest.TestCase):
             sleep_counter += 1
 
             if sleep_counter == 3:
-                listener._on_connect(None, None, None, 0)
+                listener._on_connect(None, None, None, 0, None)
 
             return seconds
 

@@ -30,10 +30,10 @@ class MqttPublisher(MqttClient):
     def get_default_client_id(cls):
         return f"pg_log_test_{random.randint(1, 9999999999)}"
 
-    def _on_connect(self, mqtt_client, userdata, flags, rc):
-        super()._on_connect(mqtt_client, userdata, flags, rc)
+    def _on_connect(self, client, userdata, flags, reason_code, properties):
+        super()._on_connect(client, userdata, flags, reason_code, properties)
 
-        if rc == 0:
+        if reason_code == 0:
             LifecycleControl.notify(StatusNotification.MQTT_PUBLISHER_CONNECTED)
 
     def _on_publish(self, mqtt_client, userdata, mid):

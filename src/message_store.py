@@ -118,7 +118,7 @@ class MessageStore(Database):
             )
 
             cursor_rowcount = result.split(" ")[-1]
-            _logger.info("clean up: %d row(s) deleted", cursor_rowcount)
+            _logger.info("clean up: %d row(s) deleted", int(cursor_rowcount))
         self._last_clean_up_time = self._now()
 
     def should_clean_up(self):
