@@ -1,6 +1,6 @@
-import attr
 import datetime
 
+import attr
 from paho.mqtt.client import MQTTMessage
 
 

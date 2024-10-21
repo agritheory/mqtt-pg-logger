@@ -37,6 +37,7 @@ coverage.xml
 # Environments
 venv.bak/
 venv/
+.venv/
 __test__/
 __work__/
 

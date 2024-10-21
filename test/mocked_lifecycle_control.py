@@ -1,7 +1,7 @@
 import time
-from typing import Optional
 
-from src.lifecycle_control import LifecycleControl, StatusNotification, LifecycleInstance
+from src.lifecycle_control import (LifecycleControl, LifecycleInstance,
+                                   StatusNotification)
 
 
 class MockedLifecycleInstance(LifecycleInstance):
@@ -12,7 +12,7 @@ class MockedLifecycleInstance(LifecycleInstance):
         super().__init__()
 
         self._set = set()
-        self._ex: Optional[Exception] = None
+        self._ex: Exception | None = None
 
     def reset(self):
         super().reset()
@@ -36,7 +36,9 @@ class MockedLifecycleInstance(LifecycleInstance):
             time.sleep(self.WAIT_TIME)
             time_waited += self.WAIT_TIME
             if 0 < time_out < time_waited:
-                raise RuntimeError(f"wait_for_notifications timed out: {time_out}s; {description}; missing: {missing_notifications}")
+                raise RuntimeError(
+                    f"wait_for_notifications timed out: {time_out}s; {description}; missing: {missing_notifications}"
+                )
 
             with self._lock:
                 if self._ex:
