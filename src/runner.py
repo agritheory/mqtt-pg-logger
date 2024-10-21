@@ -35,6 +35,7 @@ class Runner:
 
                 if len(messages) == 0:
                     # not busy
+                    await self._store.clean_up()
                     self._mqtt.ensure_connection()
 
                     if has_messages_to_notify:

@@ -103,7 +103,7 @@ class Database(abc.ABC):
         return str(get_localzone())
 
     @staticmethod
-    def _now() -> datetime:
+    def _now() -> datetime.datetime:
         """overwritable `datetime.now` for testing"""
         return datetime.datetime.now(tz=get_localzone())
 

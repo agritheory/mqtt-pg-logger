@@ -2,8 +2,6 @@ import asyncio
 import datetime
 import logging
 
-from psycopg import sql
-
 from src.database import Database, DatabaseConfKey
 from src.lifecycle_control import LifecycleControl, StatusNotification
 from src.message import Message
@@ -18,6 +16,9 @@ class MessageStore(Database):
     DEFAULT_CLEAN_UP_AFTER_DAYS = 14
     QUEUE_LIMIT = 50000
 
+    FORCE_CLEAN_UP_AFTER_SECONDS = 3000
+    LAZY_CLEAN_UP_AFTER_SECONDS = 300
+
     def __init__(self, config):
         super().__init__(config)
 
@@ -27,6 +28,8 @@ class MessageStore(Database):
         self._clean_up_after_days = config.get(
             DatabaseConfKey.CLEAN_UP_AFTER_DAYS, self.DEFAULT_CLEAN_UP_AFTER_DAYS
         )
+
+        self._messages: list[Message] = []
 
         self._last_clean_up_time = self._now()
         self._last_connect_time = None
@@ -78,9 +81,12 @@ class MessageStore(Database):
 
             LifecycleControl.notify(StatusNotification.MESSAGE_STORE_STORED)
 
+        self._messages.remove(message)
+
     async def queue(self, messages: list[Message]):
         added = 0
         lost_messages = 0
+        self._messages.extend(messages)
 
         async with asyncio.Lock():
             for message in messages:
@@ -97,22 +103,36 @@ class MessageStore(Database):
                 lost_messages,
             )
 
-    def clean_up(self):
+    async def clean_up(self):
         if self._clean_up_after_days <= 0:
             return  # skip
 
+        if self.should_clean_up():
+            await self._clean_up()
+
+    async def _clean_up(self):
         time_limit = self._now() - datetime.timedelta(days=self._clean_up_after_days)
+        async with self._pool.acquire() as connection:
+            result = await connection.execute(
+                f"DELETE FROM {self._table_name} WHERE time < '{time_limit}'"
+            )
 
-        delete_statement = sql.SQL(
-            "DELETE FROM {table} WHERE time < {time_limit}"
-        ).format(
-            table=sql.Identifier(self._table_name), time_limit=sql.Literal(time_limit)
-        )
-
-        with self._connection.cursor() as cursor:
-            cursor.execute(delete_statement)
-            cursor_rowcount = cursor.rowcount
-
-        _logger.info("clean up: %d row(s) deleted", cursor_rowcount)
-
+            cursor_rowcount = result.split(" ")[-1]
+            _logger.info("clean up: %d row(s) deleted", cursor_rowcount)
         self._last_clean_up_time = self._now()
+
+    def should_clean_up(self):
+        seconds_clean_up = (self._now() - self.last_clean_up_time).total_seconds()
+        if seconds_clean_up >= self.FORCE_CLEAN_UP_AFTER_SECONDS:
+            return True
+
+        if (
+            len(self._messages) == 0
+            and seconds_clean_up > self.LAZY_CLEAN_UP_AFTER_SECONDS
+        ):
+            seconds_since_last_store = (
+                self._now() - self.last_store_time
+            ).total_seconds()
+            return bool(seconds_since_last_store > 1)
+
+        return False
