@@ -32,10 +32,9 @@ class MqttPublisher(MqttClient):
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         super()._on_connect(client, userdata, flags, reason_code, properties)
-
         if reason_code == 0:
             LifecycleControl.notify(StatusNotification.MQTT_PUBLISHER_CONNECTED)
 
-    def _on_publish(self, client, userdata, mid):
+    def _on_publish(self, client, userdata, mid, reason_codes, properties):
         """MQTT callback is invoked when message was successfully sent to the MQTT server."""
         _logger.debug("published MQTT message %s", str(mid))

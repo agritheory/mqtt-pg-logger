@@ -117,8 +117,8 @@ class MessageStore(Database):
                 f"DELETE FROM {self._table_name} WHERE time < '{time_limit}'"
             )
 
-            cursor_rowcount = result.split(" ")[-1]
-            _logger.info("clean up: %d row(s) deleted", int(cursor_rowcount))
+            rowcount = result.split(" ")[-1]
+            _logger.info("clean up: %d row(s) deleted", int(rowcount))
         self._last_clean_up_time = self._now()
 
     def should_clean_up(self):

@@ -88,7 +88,7 @@ class MqttClient:
     DEFAULT_KEEPALIVE = 60
     DEFAULT_PORT = 1883
     DEFAULT_PORT_SSL = 8883
-    DEFAULT_PROTOCOL = 4  # 5==MQTTv5, default: 4==MQTTv311, 3==MQTTv31
+    DEFAULT_PROTOCOL = 5  # 5==MQTTv5, default: 4==MQTTv311, 3==MQTTv31
     DEFAULT_QUALITY = 1
 
     def __init__(self, config):
@@ -159,7 +159,7 @@ class MqttClient:
 
     def connect(self):
         self._client.connect_async(
-            self._host, port=self._port, keepalive=self._keepalive
+            host=self._host, port=self._port, keepalive=self._keepalive
         )
         self._client.loop_start()
         _logger.debug("%s is connecting...", self.__class__.__name__)

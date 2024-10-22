@@ -1,23 +1,18 @@
+import asyncio
 import copy
-from pathlib import Path
-import threading
 import time
-
-import pytest
-import pytest_asyncio
-from test.mocked_lifecycle_control import MockedLifecycleControl
 from test.mqtt_publisher import MqttPublisher
 from test.setup_test import SetupTest
-from unittest import mock
+from test.utils import create_config_file
 
 import attr
+import pytest
+import pytest_asyncio
 from pytest_postgresql import factories
 
 from src.database import DatabaseConfKey
-from src.lifecycle_control import LifecycleControl
 from src.mqtt_listener import MqttConfKey
 from src.mqtt_pg_logger import run_service
-from test.utils import create_config_file
 
 
 @attr.s
@@ -37,7 +32,7 @@ class SentMessage:
 postgresql_external = factories.postgresql_noproc(
     user="postgres",
     password="postgres",
-    dbname="postgres-test",
+    # dbname="postgres-test",
     # load=[Path.cwd() / "test" / "sql" / "table.sql"],
 )
 postgresql = factories.postgresql("postgresql_external")
@@ -81,15 +76,18 @@ def pg_config(postgresql):
 
 @pytest.fixture
 def config_file(pg_config, topics):
+    SetupTest.ensure_test_dir()
+    SetupTest.ensure_database_dir()
     test_config_data = SetupTest.read_test_config()
+    test_config_data["mqtt"][MqttConfKey.CLIENT_ID] = "pg-test-consumer"
     config_file = create_config_file(test_config_data, pg_config, topics)
     return config_file
 
 
 @pytest_asyncio.fixture
 async def runner(config_file):
-    await run_service(config_file, True, None, "info", True, True)  # create schema
-    await run_service(config_file, False, None, "info", True, True)  # run loop
+    await run_service(config_file, True, None, "debug", True, True)  # create schema
+    asyncio.create_task(run_service(config_file, False, None, "debug", True, True))
 
 
 @pytest.fixture
@@ -98,7 +96,7 @@ def setup_data():
 
     test_config_data = SetupTest.read_test_config()
     publisher_config_data = copy.deepcopy(test_config_data["mqtt"])
-    publisher_config_data[MqttConfKey.CLIENT_ID] = MqttPublisher.get_default_client_id()
+    publisher_config_data[MqttConfKey.CLIENT_ID] = "pg-test-publisher"
     mqtt_publisher = MqttPublisher(publisher_config_data)
     mqtt_publisher.connect()
 
@@ -119,29 +117,8 @@ def setup_data():
 
 class TestIntegration:
 
-    def run_service_threaded(self):
-        kwargs = {
-            "config_file": self._config_file,
-            "create": False,
-            "log_file": None,
-            "log_level": "info",
-            "print_logs": True,
-            "systemd_mode": True,
-        }
-
-        async def run_service_locally():
-            await run_service(**kwargs)
-
-        service_thread = threading.Thread(target=run_service_locally, daemon=True)
-        service_thread.start()
-
-    @mock.patch.object(
-        LifecycleControl, "get_instance", MockedLifecycleControl.get_instance
-    )
     def test_full_integration(self, setup_data, subscriptions, runner, postgresql):
-        # self.run_service_threaded()
-
-        mqtt_publisher = setup_data
+        mqtt_publisher: MqttPublisher = setup_data
 
         sent_messages = []
         unique_id = 0
@@ -163,12 +140,9 @@ class TestIntegration:
         mqtt_publisher.close()
 
         result = postgresql.execute("select * from journal").fetchall()
-        print(result)
+        assert len(result) == len(sent_messages)
 
-        fetched_rows = SetupTest.query_all("select * from journal")
-        assert len(fetched_rows) == len(sent_messages)
-        fetched_messages = {row["text"]: row for row in fetched_rows}
-
+        fetched_messages = {row["text"]: row for row in result}
         for sent_message in sent_messages:
             fetched_message = fetched_messages[sent_message.text]
             assert fetched_message["topic"] == sent_message.subscription.topic

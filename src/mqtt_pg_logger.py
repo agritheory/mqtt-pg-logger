@@ -97,6 +97,4 @@ async def run_service(
 
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(_main())  # exit codes must be handled by click!
+    asyncio.run(_main())
