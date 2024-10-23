@@ -8,9 +8,9 @@ import click
 
 from src.app_config import AppConfig
 from src.app_logging import AppLogging
+from src.constants import LOGGING_CHOICES
 from src.runner import Runner
 from src.schema_creator import SchemaCreator
-from src.schemas import LOGGING_CHOICES
 
 _logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ async def run_service(
     config_file: str,
     create: bool,
     log_file: str,
-    log_level: str,
+    log_level: str | int,
     print_logs: bool,
     systemd_mode: bool,
 ):

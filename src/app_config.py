@@ -3,7 +3,7 @@ import os
 import yaml
 from jsonschema import validate
 
-from src.schemas import CONFIG_JSONSCHEMA
+from src.constants import CONFIG_JSONSCHEMA
 
 
 class AppConfig:

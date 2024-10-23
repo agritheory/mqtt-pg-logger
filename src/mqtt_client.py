@@ -1,7 +1,7 @@
 import aiomqtt
 
 from src.app_config import AppConfig
-from src.schemas import MqttConfKey
+from src.constants import MqttConfKey
 
 
 class MqttClient:
