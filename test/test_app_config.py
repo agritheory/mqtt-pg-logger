@@ -8,6 +8,8 @@ from src.app_config import AppConfig
 class TestAppConfig(unittest.TestCase):
 
     def test_check_config_file_access(self):
+        SetupTest.ensure_test_dir()
+
         config_file = SetupTest.get_test_path("app_config_file.yaml")
 
         if os.path.exists(config_file):

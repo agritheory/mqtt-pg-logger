@@ -21,6 +21,7 @@ class TestDatabaseUtils(unittest.TestCase):
             "6; ",
         ]
 
+        SetupTest.ensure_test_dir()
         script_path = SetupTest.get_test_path("temp.sql")
         with open(script_path, "w") as f:
             f.write("\n".join(lines))
