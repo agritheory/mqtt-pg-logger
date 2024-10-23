@@ -4,34 +4,6 @@ import os
 import sys
 
 LOGGING_DEFAULT_LOG_LEVEL = "info"
-LOGGING_CHOICES = ["debug", "info", "warning", "error"]
-
-
-LOGGING_JSONSCHEMA = {
-    "type": "object",
-    "properties": {
-        "log_file": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Log file (path)",
-        },
-        "log_level": {
-            "type": "string",
-            "enum": LOGGING_CHOICES,
-            "description": "Log level",
-        },
-        "max_bytes": {
-            "type": "integer",
-            "minimum": 102400,
-            "description": "Max bytes per log files.",
-        },
-        "max_count": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Max count of rolled log files.",
-        },
-    },
-}
 
 
 class AppLogging:

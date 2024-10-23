@@ -1,11 +1,13 @@
 import unittest
 from test.setup_test import SetupTest
 from unittest import mock
-from unittest.mock import MagicMock
 
-from src.lifecycle_control import LifecycleControl
-from src.mqtt_client import MqttConfKey, MqttException
+from src.mqtt_client import MqttConfKey
 from src.mqtt_listener import MqttListener
+
+
+class MqttException(Exception):
+    pass
 
 
 class TestMqttListener(unittest.TestCase):
@@ -58,13 +60,9 @@ class TestMqttListenerConnectionErrors(unittest.TestCase):
 
             return seconds
 
-        mocked_lifecycle_instance = LifecycleControl.get_instance()
-        mocked_lifecycle_instance.sleep = sleep
-
         return listener
 
     @mock.patch("paho.mqtt.client.Client")
-    @mock.patch.object(LifecycleControl, "_create_instance", lambda: MagicMock())
     def test_subscribe_success(self, _):
         listener = self.create_listener()
         listener._client.subscribe.return_value = (0, "dummy")
@@ -73,7 +71,6 @@ class TestMqttListenerConnectionErrors(unittest.TestCase):
         self.assertTrue(listener.is_connected)
 
     @mock.patch("paho.mqtt.client.Client")
-    @mock.patch.object(LifecycleControl, "_create_instance", lambda: MagicMock())
     def test_subscribe_unexpected_disconnect(self, _mock_mqtt_client):
         listener = self.create_listener()
         listener._client.subscribe.return_value = (0, "dummy")
@@ -88,7 +85,6 @@ class TestMqttListenerConnectionErrors(unittest.TestCase):
             listener.ensure_connection()
 
     @mock.patch("paho.mqtt.client.Client")
-    @mock.patch.object(LifecycleControl, "_create_instance", lambda: MagicMock())
     def test_subscribe_failure(self, _mock_mqtt_client):
         listener = self.create_listener()
         listener._client.subscribe.return_value = (7, "dummy")
@@ -99,7 +95,6 @@ class TestMqttListenerConnectionErrors(unittest.TestCase):
         self.assertFalse(listener.is_connected)
 
     @mock.patch("paho.mqtt.client.Client")
-    @mock.patch.object(LifecycleControl, "_create_instance", lambda: MagicMock())
     def test_subscribe_failure2(self, _mock_mqtt_client):
         listener = self.create_listener()
         listener._client.subscribe.return_value = (7, "dummy")

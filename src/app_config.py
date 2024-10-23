@@ -3,25 +3,12 @@ import os
 import yaml
 from jsonschema import validate
 
-from src.app_logging import LOGGING_JSONSCHEMA
-from src.database import DATABASE_JSONSCHEMA
-from src.mqtt_client import MQTT_JSONSCHEMA
-
-CONFIG_JSONSCHEMA = {
-    "type": "object",
-    "properties": {
-        "database": DATABASE_JSONSCHEMA,
-        "logging": LOGGING_JSONSCHEMA,
-        "mqtt": MQTT_JSONSCHEMA,
-    },
-    "additionalProperties": False,
-    "required": ["database", "mqtt"],
-}
+from src.schemas import CONFIG_JSONSCHEMA
 
 
 class AppConfig:
 
-    def __init__(self, config_file):
+    def __init__(self, config_file: str):
         self._config_data = {}
 
         self.check_config_file_access(config_file)
@@ -46,7 +33,7 @@ class AppConfig:
         return self._config_data["mqtt"]
 
     @classmethod
-    def check_config_file_access(cls, config_file):
+    def check_config_file_access(cls, config_file: str):
         if not os.path.isfile(config_file):
             raise FileNotFoundError(f"config file ({config_file}) does not exist!")
 

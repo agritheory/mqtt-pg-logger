@@ -22,68 +22,10 @@ class DatabaseConfKey:
     CLEAN_UP_AFTER_DAYS = "clean_up_after_days"
 
 
-DATABASE_JSONSCHEMA = {
-    "type": "object",
-    "properties": {
-        DatabaseConfKey.HOST: {
-            "type": "string",
-            "minLength": 1,
-            "description": "Database host",
-        },
-        DatabaseConfKey.PORT: {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Database port",
-        },
-        DatabaseConfKey.USER: {
-            "type": "string",
-            "minLength": 1,
-            "description": "Database user",
-        },
-        DatabaseConfKey.PASSWORD: {
-            "type": "string",
-            "minLength": 1,
-            "description": "Database password",
-        },
-        DatabaseConfKey.DATABASE: {
-            "type": "string",
-            "minLength": 1,
-            "description": "Database name",
-        },
-        DatabaseConfKey.TABLE_NAME: {
-            "type": "string",
-            "minLength": 1,
-            "description": "Database table ",
-        },
-        DatabaseConfKey.TIMEZONE: {
-            "type": "string",
-            "minLength": 1,
-            "description": "Predefined session timezone",
-        },
-        DatabaseConfKey.BATCH_SIZE: {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Database batch size: message are queued until batch size is reached",
-        },
-        DatabaseConfKey.WAIT_MAX_SECONDS: {
-            "type": "integer",
-            "minimum": 0,
-            "description": "Wait (seconds) Queued messages are stored into database even the batch size is not reached.",
-        },
-        DatabaseConfKey.CLEAN_UP_AFTER_DAYS: {
-            "type": "integer",
-            "description": "Delete entries older than <n> days. Deactivate clean up with values values <= 0.",
-        },
-    },
-    "additionalProperties": False,
-    "required": [DatabaseConfKey.HOST, DatabaseConfKey.PORT, DatabaseConfKey.DATABASE],
-}
-
-
 class Database(abc.ABC):
     DEFAULT_TABLE_NAME = "journal"
 
-    def __init__(self, config) -> None:
+    def __init__(self, config: dict) -> None:
         self._config = config
         self._last_connect_time: datetime.datetime | None = None
         self._pool: asyncpg.Pool | None = None

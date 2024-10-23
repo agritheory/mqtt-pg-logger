@@ -1,6 +1,5 @@
 import copy
 import os
-
 from test.setup_test import SetupTest
 
 import yaml

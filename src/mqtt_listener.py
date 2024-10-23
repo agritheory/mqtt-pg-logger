@@ -1,9 +1,8 @@
 import logging
 import re
 
-import asyncpg
-
-from src.message import Message
+from app_config import AppConfig
+from database import Database
 from src.mqtt_client import MqttClient, MqttConfKey
 
 _logger = logging.getLogger(__name__)
@@ -11,26 +10,20 @@ _logger = logging.getLogger(__name__)
 
 class MqttListener(MqttClient):
 
-    def __init__(self, config, database):
+    def __init__(self, config: AppConfig):
         super().__init__(config)
 
-        self._config = config
-        self._database = database
-
-        self._subscriptions = set()
-        self._skip_subscription_regexes = []
-        self._messages: list[Message] = []
-
-        self._pgpool: asyncpg.Pool | None = None
+        self._mqtt = config.get_mqtt_config()
+        self._database = Database(config.get_database_config())
 
         skip_subscription_regexes = list(
-            set(config.get(MqttConfKey.SKIP_SUBSCRIPTION_REGEXES))
+            set(self._mqtt.get(MqttConfKey.SKIP_SUBSCRIPTION_REGEXES))
         )
         self._skip_subscription_regexes = [
             re.compile(regex) for regex in skip_subscription_regexes
         ]
 
-        subscriptions = config.get(MqttConfKey.SUBSCRIPTIONS)
+        subscriptions = self._mqtt.get(MqttConfKey.SUBSCRIPTIONS)
         valid_subscriptions = [
             sub
             for sub in subscriptions
@@ -44,8 +37,9 @@ class MqttListener(MqttClient):
 
         subs_qos = 1  # qos for subscriptions, not used, but necessary
 
-        self._pgpool = await asyncpg.create_pool(**self._database)
         async with self._client as client:
+            await self._database.connect()
+
             for topic in self._subscriptions:
                 await client.subscribe(topic=topic, qos=subs_qos)
                 _logger.info("subscribed to MQTT topic (%s)", topic)
@@ -57,18 +51,18 @@ class MqttListener(MqttClient):
                     message.payload,
                 )
 
-                async with self._pgpool.acquire() as connection:
+                async with self._database._pool.acquire() as connection:
                     columns = ["topic", "text", "qos", "retain", "time"]
                     record = (
                         str(message.topic),
                         message.payload.decode(),
                         message.qos,
                         message.retain,
-                        self._now(),
+                        self._database._now(),
                     )
 
                     await connection.copy_records_to_table(
-                        "journal", records=[record], columns=columns
+                        self._database._table_name, records=[record], columns=columns
                     )
 
                     _logger.info("overall message: stored=%s", message.payload.decode())

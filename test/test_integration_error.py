@@ -1,12 +1,10 @@
-import pytest
-from test.mocked_lifecycle_control import MockedLifecycleControl
 from test.setup_test import SetupTest
-from unittest import mock
+from test.utils import create_config_file
+
+import pytest
 
 from src.database import DatabaseConfKey
-from src.lifecycle_control import LifecycleControl
 from src.mqtt_pg_logger import run_service
-from test.utils import create_config_file
 
 
 @pytest.fixture(scope="session")
@@ -28,12 +26,7 @@ def config_file(database_config):
     return create_config_file(config_data, database_config, ["#"])
 
 
-class TestIntegrationErrorNoDatabase:
-
-    @mock.patch.object(
-        LifecycleControl, "get_instance", MockedLifecycleControl.get_instance
-    )
-    async def test_no_database_abort(self, config_file):
-        with pytest.raises(TypeError) as ex:
-            await run_service(config_file, False, None, "info", True, True)
-            assert "connect() got an unexpected keyword argument" in str(ex)
+async def test_no_database_abort(config_file):
+    with pytest.raises(TypeError) as ex:
+        await run_service(config_file, False, None, "info", True, True)
+        assert "connect() got an unexpected keyword argument" in str(ex)

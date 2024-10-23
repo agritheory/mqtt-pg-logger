@@ -7,9 +7,10 @@ from functools import wraps
 import click
 
 from src.app_config import AppConfig
-from src.app_logging import LOGGING_CHOICES, AppLogging
+from src.app_logging import AppLogging
 from src.runner import Runner
 from src.schema_creator import SchemaCreator
+from src.schemas import LOGGING_CHOICES
 
 _logger = logging.getLogger(__name__)
 
@@ -68,7 +69,12 @@ async def _main(config_file, create, log_file, log_level, print_logs, systemd_mo
 
 
 async def run_service(
-    config_file, create, log_file, log_level, print_logs, systemd_mode
+    config_file: str,
+    create: bool,
+    log_file: str,
+    log_level: str,
+    print_logs: bool,
+    systemd_mode: bool,
 ):
     """Logs MQTT messages to a Postgres database."""
 
