@@ -1,6 +1,4 @@
 import asyncio
-import copy
-import time
 from test.mqtt_publisher import MqttPublisher
 from test.setup_test import SetupTest
 from test.utils import create_config_file
@@ -10,8 +8,9 @@ import pytest
 import pytest_asyncio
 from pytest_postgresql import factories
 
+from src.app_config import AppConfig
+from src.constants import MqttConfKey
 from src.database import DatabaseConfKey
-from src.mqtt_listener import MqttConfKey
 from src.mqtt_pg_logger import run_service
 
 
@@ -32,8 +31,6 @@ class SentMessage:
 postgresql_external = factories.postgresql_noproc(
     user="postgres",
     password="postgres",
-    # dbname="postgres-test",
-    # load=[Path.cwd() / "test" / "sql" / "table.sql"],
 )
 postgresql = factories.postgresql("postgresql_external")
 
@@ -85,45 +82,53 @@ def config_file(pg_config, topics):
 
 
 @pytest_asyncio.fixture
-async def runner(config_file):
-    await run_service(config_file, True, None, "debug", True, True)  # create schema
-    asyncio.create_task(run_service(config_file, False, None, "debug", True, True))
-
-
-@pytest_asyncio.fixture
 async def publisher():
-    test_config_data = SetupTest.read_test_config()
-    publisher_config_data = copy.deepcopy(test_config_data["mqtt"])
-    publisher_config_data[MqttConfKey.CLIENT_ID] = "pg-test-publisher"
-    mqtt_publisher = MqttPublisher(publisher_config_data)
+    config_file = SetupTest.get_test_config_path()
+    config = AppConfig(config_file)
+    config._config_data["mqtt"][MqttConfKey.CLIENT_ID] = "pg-test-publisher"
+    mqtt_publisher = MqttPublisher(config)
     return mqtt_publisher
 
 
+@pytest.mark.asyncio
 async def test_full_integration(
-    publisher: MqttPublisher, subscriptions, runner, postgresql
+    config_file,
+    postgresql,
+    subscriptions,
+    publisher: MqttPublisher,
 ):
-    sent_messages = []
+    await run_service(config_file, True, None, "debug", True, True)  # create schema
+
     unique_id = 0
+    message_queue = []
     for _ in range(1, 9):
         for subscription in subscriptions:
             unique_id = unique_id + 1
             message = SentMessage(
                 subscription=subscription, text=f"{unique_id}-{subscription.topic}"
             )
-            result = await publisher.publish(
+            message_queue.append(message)
+
+    async with asyncio.TaskGroup() as tg:
+        loop_task = tg.create_task(
+            run_service(config_file, False, None, "debug", True, True)
+        )
+
+        sent_messages = []
+        for message in message_queue:
+            await publisher.publish(
                 topic=message.subscription.topic, payload=message.text
             )
-            message.message_id = result.mid
-
             if not message.subscription.skip:
                 sent_messages.append(message)
 
-    time.sleep(3)
+        result = postgresql.execute("select text, topic from journal").fetchall()
+        assert len(result) == len(sent_messages)
 
-    result = postgresql.execute("select * from journal").fetchall()
-    assert len(result) == len(sent_messages)
+        stored_messages = {row[0]: row for row in result}
+        for sent_message in sent_messages:
+            stored_message = stored_messages.get(sent_message.text)
+            assert stored_message
+            assert stored_message[1] == sent_message.subscription.topic
 
-    fetched_messages = {row["text"]: row for row in result}
-    for sent_message in sent_messages:
-        fetched_message = fetched_messages[sent_message.text]
-        assert fetched_message["topic"] == sent_message.subscription.topic
+        loop_task.cancel()

@@ -4,21 +4,16 @@ import os
 import pathlib
 import sys
 
-import psycopg
 import testing.postgresql
 import yaml
 from jsonschema import validate
-from psycopg.rows import dict_row
 
-from src.mqtt_client import MQTT_JSONSCHEMA, MqttConfKey
+from src.constants import MQTT_JSONSCHEMA, MqttConfKey
 from src.schema_creator import SchemaCreator
 
 
 class SetupTestException(Exception):
     pass
-
-
-_logger = logging.getLogger(__name__)
 
 
 class SetupTest:
@@ -158,46 +153,6 @@ class SetupTest:
             return {}
 
     @classmethod
-    def execute_commands(cls, commands: list[str]):
-        if not cls._postgresql:
-            raise SetupTestException("Database not initialized!")
-
-        with psycopg.connect(
-            **SetupTest.get_database_params(psycopg_naming=True)
-        ) as connection:
-            with connection.cursor() as cursor:
-                for command in commands:
-                    try:
-                        cursor.execute(command)
-                    except Exception as ex:
-                        _logger.error("db-command failed: %s\n%s", ex, command)
-                        raise
-
-    @classmethod
-    def query_one(cls, query: str):
-        # if not cls._postgresql:
-        #     raise SetupTestException("Database not initialized!")
-
-        with psycopg.connect(
-            **SetupTest.get_database_params(psycopg_naming=True)
-        ) as connection:
-            with connection.cursor(row_factory=dict_row) as cursor:
-                cursor.execute(query)
-                return cursor.fetchone()
-
-    @classmethod
-    def query_all(cls, query: str):
-        if not cls._postgresql:
-            raise SetupTestException("Database not initialized!")
-
-        with psycopg.connect(
-            **SetupTest.get_database_params(psycopg_naming=True)
-        ) as connection:
-            with connection.cursor(row_factory=dict_row) as cursor:
-                cursor.execute(query)
-                return cursor.fetchall()
-
-    @classmethod
     def valdate_test_config_file(cls, config_data):
         mqtt_schema = copy.deepcopy(MQTT_JSONSCHEMA)
         schema_requires = mqtt_schema["required"]
@@ -224,8 +179,12 @@ class SetupTest:
         validate(config_data, test_config_schema)
 
     @classmethod
+    def get_test_config_path(cls) -> str:
+        return os.path.join(cls.get_project_dir(), "mqtt-pg-logger.yaml")
+
+    @classmethod
     def read_test_config(cls) -> dict:
-        config_file = os.path.join(cls.get_project_dir(), "mqtt-pg-logger.yaml")
+        config_file = cls.get_test_config_path()
         if not os.path.isfile(config_file):
             raise FileNotFoundError(f"test config file ({config_file}) does not exist!")
         with open(config_file) as stream:

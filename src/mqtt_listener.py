@@ -1,9 +1,11 @@
+import asyncio
 import logging
 import re
 
-from app_config import AppConfig
-from database import Database
-from src.mqtt_client import MqttClient, MqttConfKey
+from src.app_config import AppConfig
+from src.constants import MqttConfKey
+from src.database import Database
+from src.mqtt_client import MqttClient
 
 _logger = logging.getLogger(__name__)
 
@@ -31,12 +33,15 @@ class MqttListener(MqttClient):
         ]
         self._subscriptions = list(set(valid_subscriptions))
 
-    async def subscribe(self):
+    async def listen(self):
         if not self._subscriptions:
             return
 
-        subs_qos = 1  # qos for subscriptions, not used, but necessary
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(self.process())
 
+    async def process(self):
+        subs_qos = 1  # qos for subscriptions, not used, but necessary
         async with self._client as client:
             await self._database.connect()
 

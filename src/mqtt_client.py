@@ -13,12 +13,14 @@ class MqttClient:
     DEFAULT_QUALITY = 1
 
     def __init__(self, config: AppConfig):
-
-        self._client = None
-        self._connection_error_info: str | None = None
-        self._shutdown = False
-
         self._mqtt = config.get_mqtt_config()
+
+        # SSL and TLS context
+        ssl_ca_certs = self._mqtt.get(MqttConfKey.SSL_CA_CERTS)
+        ssl_certfile = self._mqtt.get(MqttConfKey.SSL_CERTFILE)
+        ssl_keyfile = self._mqtt.get(MqttConfKey.SSL_KEYFILE)
+        ssl_insecure = self._mqtt.get(MqttConfKey.SSL_INSECURE, False)
+        is_ssl = ssl_ca_certs or ssl_certfile or ssl_keyfile
 
         self._host = self._mqtt.get(MqttConfKey.HOST)
         self._port = self._mqtt.get(MqttConfKey.PORT)
@@ -36,13 +38,6 @@ class MqttClient:
             raise ValueError(
                 f"mandatory mqtt configuration not found ({MqttConfKey.HOST}, {MqttConfKey.SUBSCRIPTIONS})'!"
             )
-
-        # SSL and TLS context
-        ssl_ca_certs = self._mqtt.get(MqttConfKey.SSL_CA_CERTS)
-        ssl_certfile = self._mqtt.get(MqttConfKey.SSL_CERTFILE)
-        ssl_keyfile = self._mqtt.get(MqttConfKey.SSL_KEYFILE)
-        ssl_insecure = self._mqtt.get(MqttConfKey.SSL_INSECURE, False)
-        is_ssl = ssl_ca_certs or ssl_certfile or ssl_keyfile
 
         tls_params = {
             "ca_certs": ssl_ca_certs,

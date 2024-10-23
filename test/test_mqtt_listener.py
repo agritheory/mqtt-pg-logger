@@ -2,7 +2,7 @@ import unittest
 from test.setup_test import SetupTest
 from unittest import mock
 
-from src.mqtt_client import MqttConfKey
+from src.constants import MqttConfKey
 from src.mqtt_listener import MqttListener
 
 

@@ -14,7 +14,7 @@ class Runner:
     async def loop(self):
         """endless loop"""
         time_step = 0.05
-        await self._mqtt.subscribe()
+        await self._mqtt.listen()
         time.sleep(time_step)
 
     async def close(self):
