@@ -92,12 +92,6 @@ class Database(abc.ABC):
         )  # define by SQL scripts
         self._timezone: str | None = config.get(DatabaseConfKey.TIMEZONE)
 
-    @property
-    def is_connected(self) -> bool:
-        if not self._pool:
-            return False
-        return not bool(self._pool.is_closing())
-
     @staticmethod
     def get_default_time_zone() -> str:
         return str(get_localzone())

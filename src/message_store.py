@@ -1,4 +1,3 @@
-import asyncio
 import datetime
 import logging
 
@@ -82,57 +81,3 @@ class MessageStore(Database):
             LifecycleControl.notify(StatusNotification.MESSAGE_STORE_STORED)
 
         self._messages.remove(message)
-
-    async def queue(self, messages: list[Message]):
-        added = 0
-        lost_messages = 0
-        self._messages.extend(messages)
-
-        async with asyncio.Lock():
-            for message in messages:
-                if len(messages) > self.QUEUE_LIMIT:
-                    lost_messages = len(messages) - added
-                    break
-                await self.store(message)
-                added += 1
-
-        if lost_messages > 0:
-            _logger.error(
-                "message queue limit (%d) reached => lost %d messages!",
-                self.QUEUE_LIMIT,
-                lost_messages,
-            )
-
-    async def clean_up(self):
-        if self._clean_up_after_days <= 0:
-            return  # skip
-
-        if self.should_clean_up():
-            await self._clean_up()
-
-    async def _clean_up(self):
-        time_limit = self._now() - datetime.timedelta(days=self._clean_up_after_days)
-        async with self._pool.acquire() as connection:
-            result = await connection.execute(
-                f"DELETE FROM {self._table_name} WHERE time < '{time_limit}'"
-            )
-
-            rowcount = result.split(" ")[-1]
-            _logger.info("clean up: %d row(s) deleted", int(rowcount))
-        self._last_clean_up_time = self._now()
-
-    def should_clean_up(self):
-        seconds_clean_up = (self._now() - self.last_clean_up_time).total_seconds()
-        if seconds_clean_up >= self.FORCE_CLEAN_UP_AFTER_SECONDS:
-            return True
-
-        if (
-            len(self._messages) == 0
-            and seconds_clean_up > self.LAZY_CLEAN_UP_AFTER_SECONDS
-        ):
-            seconds_since_last_store = (
-                self._now() - self.last_store_time
-            ).total_seconds()
-            return bool(seconds_since_last_store > 1)
-
-        return False

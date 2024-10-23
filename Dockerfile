@@ -1,6 +1,6 @@
 FROM python:3.12-alpine
 
-RUN apk add --no-cache gcc musl-dev
+RUN apk add --no-cache git gcc musl-dev
 
 RUN pip install "cython<3.0.0" wheel
 
@@ -19,4 +19,3 @@ RUN chmod +x /entrypoint.sh
 EXPOSE 5432
 
 ENTRYPOINT ["/entrypoint.sh"]
-

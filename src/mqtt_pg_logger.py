@@ -53,6 +53,13 @@ async def _main(config_file, create, log_file, log_level, print_logs, systemd_mo
         await run_service(
             config_file, create, log_file, log_level, print_logs, systemd_mode
         )
+
+        # async with asyncio.TaskGroup() as tg:
+        #     tg.create_task(
+        #         run_service(
+        #             config_file, create, log_file, log_level, print_logs, systemd_mode
+        #         )
+        #     )
     except KeyboardInterrupt:
         pass  # exits 0 by default
     except Exception as ex:

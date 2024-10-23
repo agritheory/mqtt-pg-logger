@@ -90,59 +90,40 @@ async def runner(config_file):
     asyncio.create_task(run_service(config_file, False, None, "debug", True, True))
 
 
-@pytest.fixture
-def setup_data():
-    service_thread = None
-
+@pytest_asyncio.fixture
+async def publisher():
     test_config_data = SetupTest.read_test_config()
     publisher_config_data = copy.deepcopy(test_config_data["mqtt"])
     publisher_config_data[MqttConfKey.CLIENT_ID] = "pg-test-publisher"
     mqtt_publisher = MqttPublisher(publisher_config_data)
-    mqtt_publisher.connect()
-
-    yield mqtt_publisher
-
-    mqtt_publisher.close()
-    if service_thread:
-        try:
-            while service_thread.is_alive():
-                service_thread.join(
-                    1
-                )  # join shortly to not block KeyboardInterrupt exceptions
-        except KeyboardInterrupt:
-            pass
-
-    SetupTest.close_database()
+    return mqtt_publisher
 
 
-class TestIntegration:
+async def test_full_integration(
+    publisher: MqttPublisher, subscriptions, runner, postgresql
+):
+    sent_messages = []
+    unique_id = 0
+    for _ in range(1, 9):
+        for subscription in subscriptions:
+            unique_id = unique_id + 1
+            message = SentMessage(
+                subscription=subscription, text=f"{unique_id}-{subscription.topic}"
+            )
+            result = await publisher.publish(
+                topic=message.subscription.topic, payload=message.text
+            )
+            message.message_id = result.mid
 
-    def test_full_integration(self, setup_data, subscriptions, runner, postgresql):
-        mqtt_publisher: MqttPublisher = setup_data
+            if not message.subscription.skip:
+                sent_messages.append(message)
 
-        sent_messages = []
-        unique_id = 0
-        for _ in range(1, 9):
-            for subscription in subscriptions:
-                unique_id = unique_id + 1
-                message = SentMessage(
-                    subscription=subscription, text=f"{unique_id}-{subscription.topic}"
-                )
-                result = mqtt_publisher.publish(
-                    topic=message.subscription.topic, payload=message.text
-                )
-                message.message_id = result.mid
+    time.sleep(3)
 
-                if not message.subscription.skip:
-                    sent_messages.append(message)
+    result = postgresql.execute("select * from journal").fetchall()
+    assert len(result) == len(sent_messages)
 
-        time.sleep(3)
-        mqtt_publisher.close()
-
-        result = postgresql.execute("select * from journal").fetchall()
-        assert len(result) == len(sent_messages)
-
-        fetched_messages = {row["text"]: row for row in result}
-        for sent_message in sent_messages:
-            fetched_message = fetched_messages[sent_message.text]
-            assert fetched_message["topic"] == sent_message.subscription.topic
+    fetched_messages = {row["text"]: row for row in result}
+    for sent_message in sent_messages:
+        fetched_message = fetched_messages[sent_message.text]
+        assert fetched_message["topic"] == sent_message.subscription.topic

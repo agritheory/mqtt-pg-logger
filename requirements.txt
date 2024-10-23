@@ -1,3 +1,4 @@
+aiomqtt @ git+https://github.com/empicano/aiomqtt.git
 asyncpg == 0.30.0
 attrs == 22.2.0
 click == 8.1.3
