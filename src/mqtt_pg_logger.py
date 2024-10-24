@@ -51,9 +51,7 @@ def coro(f):
 @coro
 async def _main(config_file, create, log_file, log_level, print_logs, systemd_mode):
     try:
-        await run_service(
-            config_file, create, log_file, log_level, print_logs, systemd_mode
-        )
+        await run_service(config_file, create, log_file, log_level, print_logs, systemd_mode)
 
         # async with asyncio.TaskGroup() as tg:
         #     tg.create_task(

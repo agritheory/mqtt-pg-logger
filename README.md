@@ -57,11 +57,11 @@ python3 -m venv venv
 # activate venv
 source ./venv/bin/activate
 
-# check python version >= 3.7
+# check python version >= 3.12
 python --version
 
 # install required packages
-pip install --upgrade -r requirements.txt
+poetry install
 ```
 
 ### Configuration
@@ -103,7 +103,7 @@ vi ./mqtt-pg-logger.service
 
 # install service
 sudo cp ./mqtt-pg-logger.service /etc/systemd/system/
-# alternativ: sudo cp ./mqtt-pg-logger.service.sample /etc/systemd/system//mqtt-pg-logger.service
+# alternative: sudo cp ./mqtt-pg-logger.service.sample /etc/systemd/system//mqtt-pg-logger.service
 # after changes
 sudo systemctl daemon-reload
 

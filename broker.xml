@@ -259,7 +259,7 @@ under the License.
       </addresses>
 
 
-      <!-- Uncomment the following if you want to use the Standard LoggingActiveMQServerPlugin pluging to log in events
+      <!-- Uncomment the following if you want to use the Standard LoggingActiveMQServerPlugin plugging to log in events
       <broker-plugins>
          <broker-plugin class-name="org.apache.activemq.artemis.core.server.plugin.impl.LoggingActiveMQServerPlugin">
             <property key="LOG_ALL_EVENTS" value="true"/>

@@ -110,15 +110,11 @@ async def test_full_integration(
             message_queue.append(message)
 
     async with asyncio.TaskGroup() as tg:
-        loop_task = tg.create_task(
-            run_service(config_file, False, None, "debug", True, True)
-        )
+        loop_task = tg.create_task(run_service(config_file, False, None, "debug", True, True))
 
         sent_messages = []
         for message in message_queue:
-            await publisher.publish(
-                topic=message.subscription.topic, payload=message.text
-            )
+            await publisher.publish(topic=message.subscription.topic, payload=message.text)
             if not message.subscription.skip:
                 sent_messages.append(message)
 

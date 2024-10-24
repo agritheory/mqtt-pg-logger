@@ -33,9 +33,7 @@ class DatabaseUtils:
         return cls._parse_lines_into_commands(lines)
 
     @classmethod
-    def _parse_lines_into_commands(
-        cls, lines: list[str], strip_comments=True
-    ) -> list[str]:
+    def _parse_lines_into_commands(cls, lines: list[str], strip_comments=True) -> list[str]:
         commands = []
         command = None
 

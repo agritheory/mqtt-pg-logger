@@ -4,12 +4,10 @@ import os
 import pathlib
 import sys
 
-import testing.postgresql
 import yaml
 from jsonschema import validate
 
 from src.constants import MQTT_JSONSCHEMA, MqttConfKey
-from src.schema_creator import SchemaCreator
 
 
 class SetupTestException(Exception):
@@ -22,7 +20,6 @@ class SetupTest:
     DATABASE_DIR = os.path.join(TEST_DIR, "database")
 
     _logging_inited = False
-    _postgresql: testing.postgresql.Postgresql | None = None
 
     @classmethod
     def init_logging(cls):
@@ -112,45 +109,6 @@ class SetupTest:
     @classmethod
     def get_trigger_script_path(cls) -> str:
         return os.path.join(cls.get_project_dir(), "sql", "trigger.sql")
-
-    @classmethod
-    def init_database(cls, recreate=False, skip_schema_creation=False):
-        database_dir = cls.get_database_dir()
-
-        if recreate:
-            cls.close_database(shutdown=True)
-
-        if not cls._postgresql:
-            cls.ensure_clean_dir(database_dir)
-            cls._postgresql = testing.postgresql.Postgresql(base_dir=database_dir)
-
-            if not skip_schema_creation:
-                database_params = SetupTest.get_database_params()
-                with SchemaCreator(database_params) as schema_creator:
-                    schema_creator.create_schema()
-
-    @classmethod
-    def close_database(cls, shutdown=False):
-        if cls._postgresql:
-            if shutdown:
-                cls._postgresql.stop()
-                cls._postgresql = None
-
-    @classmethod
-    def get_database_params(cls, psycopg_naming=False):
-        if cls._postgresql:
-            params = cls._postgresql.dsn()
-
-            if psycopg_naming:
-                db_name_1 = params.get("dbname")
-                db_name_2 = params.get("database")
-                if not db_name_1 and db_name_2:
-                    params["dbname"] = db_name_2
-                    del params["database"]
-
-            return params
-        else:
-            return {}
 
     @classmethod
     def valdate_test_config_file(cls, config_data):

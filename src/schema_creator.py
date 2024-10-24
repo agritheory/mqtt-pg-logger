@@ -22,8 +22,8 @@ class SchemaCreator(Database):
     async def create_schema(self) -> None:
         if self._table_name != self.DEFAULT_TABLE_NAME:
             raise ValueError(
-                f"Cannot create the database schema if an individual table name ({self._table_name}) is configured. Use the default name ({self.DEFAULT_TABLE_NAME}) or adapt and "
-                "execute the SQL scripts manually!"
+                f"Cannot create the database schema if an individual table name ({self._table_name}) is configured."
+                "Use the default name ({self.DEFAULT_TABLE_NAME}) or adapt and execute the SQL scripts manually!"
             )
 
         # if table exists, an error is thrown anyway, so no need for check explicitly.
