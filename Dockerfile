@@ -1,7 +1,6 @@
-FROM python:3.12-alpine
+FROM python:3.12-slim
 
-RUN apk add --no-cache git gcc musl-dev
-RUN pip install "cython<3.0.0" wheel
+RUN apt update && apt install -y git
 
 RUN mkdir /mqtt-pg-logger
 COPY . /mqtt-pg-logger/
