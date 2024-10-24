@@ -8,31 +8,30 @@ Collects [MQTT](https://en.wikipedia.org/wiki/MQTT) messages and stores them in 
 
 ## Docker
 
-### Quickstart 
+### Quickstart
 
-```docker-compose up```
+```docker compose up```
 
-### Configuration 
-The docker-compose file is setup to run 
+### Configuration
+The docker compose file is setup to run
 - mqtt-pg-logger
 - ActiveMQ Artemis
-- TimescaleDB 
+- TimescaleDB
 
-All configuration is done via env vars in the docker-compose file, and default configuration is setup to just work out of the box. 
+All configuration is done via env vars in the docker compose file, and default configuration is setup to just work out of the box.
 
-**Ports** 
-- `8161` - Artemis Web UI 
-- `616161` - Artemis main messaging port, accepts all protocols 
+**Ports**
+- `8161` - Artemis Web UI
+- `616161` - Artemis main messaging port, accepts all protocols
 - `1883` - Artemis MQTT port
 
-### Development 
-When developing mqtt-pg-logger code make sure to rebuild the docker image after making code changes if everything is running in docker. 
+### Development
+When developing mqtt-pg-logger code make sure to rebuild the docker image after making code changes if everything is running in docker.
 
 ```
-docker-compose build mqtt-pg-logger
-docker-compose down 
-docker-compose up
-``` 
+docker compose build mqtt-pg-logger
+docker compose up --watch
+```
 
 ## Manual
 
@@ -58,11 +57,11 @@ python3 -m venv venv
 # activate venv
 source ./venv/bin/activate
 
-# check python version >= 3.7
+# check python version >= 3.12
 python --version
 
 # install required packages
-pip install --upgrade -r requirements.txt
+poetry install
 ```
 
 ### Configuration
@@ -104,7 +103,7 @@ vi ./mqtt-pg-logger.service
 
 # install service
 sudo cp ./mqtt-pg-logger.service /etc/systemd/system/
-# alternativ: sudo cp ./mqtt-pg-logger.service.sample /etc/systemd/system//mqtt-pg-logger.service
+# alternative: sudo cp ./mqtt-pg-logger.service.sample /etc/systemd/system//mqtt-pg-logger.service
 # after changes
 sudo systemctl daemon-reload
 
@@ -119,15 +118,15 @@ journalctl -u mqtt-pg-logger --no-pager --since "5 minutes ago"
 sudo systemctl enable mqtt-pg-logger.service
 ```
 
-## Testing 
+## Testing
 
-### Prerequisites 
+### Prerequisites
 
-- Docker 
+- Docker
 - [Act](https://nektosact.com/installation/index.html) (For running GitHub Actions locally).
   - I recommend installing the [GitHub CLI Extension](https://nektosact.com/installation/gh.html)
 
-### How to run 
+### How to run
 Just run `act push` . If you're using the GitHub CLI Extension run `gh act push`. This will trigger the workflow file that should run on a GitHub `push` event. On first run, you will be asked to pick the size of the running, just pick 'Medium'.
 
 ## Additional infos

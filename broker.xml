@@ -50,7 +50,7 @@ under the License.
 
       <large-messages-directory>data/large-messages</large-messages-directory>
 
-      
+
       <!-- if you want to retain your journal uncomment this following configuration.
 
       This will allow your system to keep 7 days of your data, up to 10G. Tweak it accordingly to your use case and capacity.
@@ -72,7 +72,7 @@ under the License.
       <journal-device-block-size>4096</journal-device-block-size>
 
       <journal-file-size>10M</journal-file-size>
-      
+
       <!--
        This value was determined through a calculation.
        Your system could perform 35.71 writes per millisecond
@@ -134,7 +134,7 @@ under the License.
 
       <critical-analyzer-policy>HALT</critical-analyzer-policy>
 
-      
+
       <page-sync-timeout>1172000</page-sync-timeout>
 
 
@@ -259,7 +259,7 @@ under the License.
       </addresses>
 
 
-      <!-- Uncomment the following if you want to use the Standard LoggingActiveMQServerPlugin pluging to log in events
+      <!-- Uncomment the following if you want to use the Standard LoggingActiveMQServerPlugin plugging to log in events
       <broker-plugins>
          <broker-plugin class-name="org.apache.activemq.artemis.core.server.plugin.impl.LoggingActiveMQServerPlugin">
             <property key="LOG_ALL_EVENTS" value="true"/>

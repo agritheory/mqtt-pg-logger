@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
+import asyncio
 import logging
 import sys
-from typing import Optional
+from functools import wraps
 
 import click
 
 from src.app_config import AppConfig
-from src.app_logging import AppLogging, LOGGING_CHOICES
+from src.app_logging import AppLogging
+from src.constants import LOGGING_CHOICES
 from src.runner import Runner
 from src.schema_creator import SchemaCreator
 
-
 _logger = logging.getLogger(__name__)
+
+
+def coro(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(f(*args, **kwargs))
+
+    return wrapper
 
 
 @click.command()
@@ -25,70 +34,78 @@ _logger = logging.getLogger(__name__)
 @click.option(
     "--create",
     is_flag=True,
-    help="Create database table (if not exists) and create or replace a trigger"
+    help="Create database table (if not exists) and create or replace a trigger",
 )
-@click.option(
-    "--log-file",
-    help="Log file (if stated journal logging is disabled)"
-)
+@click.option("--log-file", help="Log file (if stated journal logging is disabled)")
 @click.option(
     "--log-level",
     help="Log level",
     type=click.Choice(LOGGING_CHOICES, case_sensitive=False),
 )
-@click.option(
-    "--print-logs",
-    is_flag=True,
-    help="Print log output to console too"
-)
+@click.option("--print-logs", is_flag=True, help="Print log output to console too")
 @click.option(
     "--systemd-mode",
     is_flag=True,
-    help="Systemd/journald integration: skip timestamp + prints to console"
+    help="Systemd/journald integration: skip timestamp + prints to console",
 )
-def _main(config_file, create, log_file, log_level, print_logs, systemd_mode):
+@coro
+async def _main(config_file, create, log_file, log_level, print_logs, systemd_mode):
     try:
-        run_service(config_file, create, log_file, log_level, print_logs, systemd_mode)
+        await run_service(config_file, create, log_file, log_level, print_logs, systemd_mode)
 
+        # async with asyncio.TaskGroup() as tg:
+        #     tg.create_task(
+        #         run_service(
+        #             config_file, create, log_file, log_level, print_logs, systemd_mode
+        #         )
+        #     )
     except KeyboardInterrupt:
         pass  # exits 0 by default
-
     except Exception as ex:
         _logger.exception(ex)
         sys.exit(1)  # a simple return is not understood by click
 
 
-def run_service(config_file, create, log_file, log_level, print_logs, systemd_mode):
+async def run_service(
+    config_file: str,
+    create: bool,
+    log_file: str,
+    log_level: str | int,
+    print_logs: bool,
+    systemd_mode: bool,
+):
     """Logs MQTT messages to a Postgres database."""
 
-    creator: Optional[SchemaCreator] = None
-    runner: Optional[Runner] = None
+    creator: SchemaCreator | None = None
+    runner: Runner | None = None
 
     try:
         app_config = AppConfig(config_file)
         AppLogging.configure(
             app_config.get_logging_config(),
-            log_file, log_level, print_logs, systemd_mode
+            log_file,
+            log_level,
+            print_logs,
+            systemd_mode,
         )
 
         _logger.debug("start")
 
         if create:
             creator = SchemaCreator(app_config.get_database_config())
-            creator.connect()
-            creator.create_schema()
+            await creator.connect()
+            await creator.create_schema()
         else:
             runner = Runner(app_config)
-            runner.loop()
-
+            await runner.loop()
     finally:
         _logger.info("shutdown")
 
         if creator is not None:
-            creator.close()
+            await creator.close()
         if runner is not None:
-            runner.close()
+            await runner.close()
 
 
-if __name__ == '__main__':
-    _main()  # exit codes must be handled by click!
+if __name__ == "__main__":
+    asyncio.run(_main())

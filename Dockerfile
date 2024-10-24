@@ -1,8 +1,6 @@
-FROM python:3.12-alpine
+FROM python:3.12-slim
 
-RUN apk add --no-cache gcc musl-dev
-
-RUN pip install "cython<3.0.0" wheel
+RUN apt update && apt install -y git
 
 RUN mkdir /mqtt-pg-logger
 COPY . /mqtt-pg-logger/
@@ -11,7 +9,9 @@ COPY sql/convert.sql /docker-entrypoint-initdb.d/01_convert.sql
 COPY sql/trigger.sql /docker-entrypoint-initdb.d/02_trigger.sql
 
 WORKDIR /mqtt-pg-logger
-RUN python -m pip install -r requirements.txt
+RUN pip install poetry
+RUN poetry config virtualenvs.create false
+RUN poetry install --only main --no-interaction --no-ansi
 
 COPY entrypoint.sh /
 RUN chmod +x /entrypoint.sh
@@ -19,4 +19,3 @@ RUN chmod +x /entrypoint.sh
 EXPOSE 5432
 
 ENTRYPOINT ["/entrypoint.sh"]
-

@@ -1,27 +1,13 @@
 import os
-from typing import List
 
 
 class DatabaseUtils:
-
-    @classmethod
-    def load_commands(cls, file: str) -> List[str]:
+    @staticmethod
+    def load_as_single_command(file: str) -> str:
         """Loads commands from a file"""
 
         if not os.path.isfile(file):
-            raise FileNotFoundError("Script file ({}) not found".format(file))
-
-        with open(file) as f:
-            lines = f.readlines()
-
-        return cls._parse_lines_into_commands(lines)
-
-    @classmethod
-    def load_as_single_command(cls, file: str) -> str:
-        """Loads commands from a file"""
-
-        if not os.path.isfile(file):
-            raise FileNotFoundError("Script file ({}) not found".format(file))
+            raise FileNotFoundError(f"Script file ({file}) not found")
 
         with open(file) as f:
             lines = f.readlines()
@@ -29,13 +15,25 @@ class DatabaseUtils:
         return "\n".join(lines)
 
     @classmethod
-    def split_commands(cls, text: str) -> List[str]:
+    def load_commands(cls, file: str) -> list[str]:
+        """Loads commands from a file"""
+
+        if not os.path.isfile(file):
+            raise FileNotFoundError(f"Script file ({file}) not found")
+
+        with open(file) as f:
+            lines = f.readlines()
+
+        return cls._parse_lines_into_commands(lines)
+
+    @classmethod
+    def split_commands(cls, text: str) -> list[str]:
         text = text.replace("\r", "\n")
         lines = text.split("\n")
         return cls._parse_lines_into_commands(lines)
 
     @classmethod
-    def _parse_lines_into_commands(cls, lines: List[str], strip_comments=True) -> List[str]:
+    def _parse_lines_into_commands(cls, lines: list[str], strip_comments=True) -> list[str]:
         commands = []
         command = None
 

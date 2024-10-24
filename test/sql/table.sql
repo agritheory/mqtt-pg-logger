@@ -1,8 +1,3 @@
--- The content of this file is parsed into commands by a quite simple algorithm. So please don't use ";" in comments
-
-
--- DROP TABLE pgqueuer;  -- do it manually. the automatic creation will abort/fail here.
-
 CREATE TYPE pgqueuer_status AS ENUM ('queued', 'picked');
 
 CREATE TABLE pgqueuer (
@@ -23,26 +18,7 @@ CREATE TABLE pgqueuer (
     time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-
-COMMENT ON COLUMN pgqueuer.pgqueuer_id is 'Primary key';
-COMMENT ON COLUMN pgqueuer.message_id is 'Client message id (mid).';
-COMMENT ON COLUMN pgqueuer.text is 'Message payload as standard text';
-COMMENT ON COLUMN pgqueuer.data is 'JSON representation (generated out of "text" if not explicitly provided)';
-COMMENT ON COLUMN pgqueuer.qos is 'Message quality of service 0, 1 or 2.';
-COMMENT ON COLUMN pgqueuer.retain is 'If 1, the message is a retained message.';
-COMMENT ON COLUMN pgqueuer.topic is 'Message topic.';
-COMMENT ON COLUMN pgqueuer.time is 'Message or insert time';
-COMMENT ON COLUMN pgqueuer.priority is 'Priority of the job, higher value means higher priority.';
-COMMENT ON COLUMN pgqueuer.created is 'Timestamp when the job was created.';
-COMMENT ON COLUMN pgqueuer.updated is 'Timestamp when the job was last updated.';
-COMMENT ON COLUMN pgqueuer.status is 'Status of the job (queued, picked).';
-COMMENT ON COLUMN pgqueuer.entrypoint is 'The entrypoint function that will process the job.';
-
 -- used for regular clean up
-CREATE INDEX CONCURRENTLY pgqueuer_time_idx ON pgqueuer ( time );
-
-CREATE INDEX CONCURRENTLY pgqueuer_name_idx ON pgqueuer ( topic );
-
 CREATE TYPE pgqueuer_statistics_status AS ENUM ('exception', 'successful');
 
 CREATE TABLE pgqueuer_statistics (
@@ -63,7 +39,3 @@ CREATE TABLE journal (
     retain INTEGER,
     time TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-
--- manual test
--- INSERT INTO pgqueuer (message_id, topic, text, qos, retain) values (1, 'topic', '{"a": "json"}', 1, 0);
--- SELECT * FROM pgqueuer;
