@@ -26,21 +26,20 @@ class MqttListener(MqttClient):
         ]
 
         subscriptions = self._mqtt.get(MqttConfKey.SUBSCRIPTIONS)
-        valid_subscriptions = [
-            sub
-            for sub in subscriptions
-            if not any(regex.match(sub) for regex in self._skip_subscription_regexes)
-        ]
+        valid_subscriptions = [sub for sub in subscriptions if self.is_valid_topic(sub)]
         self._subscriptions = list(set(valid_subscriptions))
 
-    async def listen(self):
+    def is_valid_topic(self, topic: str) -> bool:
+        return not any(regex.match(topic) for regex in self._skip_subscription_regexes)
+
+    async def listen(self) -> None:
         if not self._subscriptions:
             return
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(self.process())
 
-    async def process(self):
+    async def process(self) -> None:
         subs_qos = 1  # qos for subscriptions, not used, but necessary
         async with self._client as client:
             await self._database.connect()
