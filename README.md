@@ -175,3 +175,9 @@ MIT © [Raul Rosenlöcher](https://github.com/rosenloecher-it)
 The code is available at [GitHub][home].
 
 [home]: https://github.com/rosenloecher-it/mqtt-pg-logger
+
+## Setting up certs 
+
+Use DNS Verification with Certbot to generate certificates (how to automate?)
+sudo openssl pkcs12 -export -out fullchain.p12 -in /etc/letsencrypt/live/artemis.falk.host/fullchain.pem -inkey /etc/letsencrypt/live/artemis.falk.host/privkey.pem
+sudo keytool -importkeystore -deststorepass securepass -destkeypass securepass -destkeystore le_keystore.jks -srckeystore fullchain.p12 -srcstoretype PKCS12 -srcstorepass securepass
