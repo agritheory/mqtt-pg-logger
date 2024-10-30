@@ -8,15 +8,15 @@ logging.getLogger("asyncio").setLevel(logging.INFO)
 
 
 class Runner:
-    def __init__(self, app_config: AppConfig):
-        self._mqtt = MqttListener(app_config)
+	def __init__(self, app_config: AppConfig):
+		self._mqtt = MqttListener(app_config)
 
-    async def loop(self):
-        """endless loop"""
-        time_step = 0.05
-        await self._mqtt.listen()
-        time.sleep(time_step)
+	async def loop(self):
+		"""endless loop"""
+		time_step = 0.05
+		await self._mqtt.listen()
+		time.sleep(time_step)
 
-    async def close(self):
-        if self._mqtt is not None:
-            self._mqtt = None
+	async def close(self):
+		if self._mqtt is not None:
+			self._mqtt = None

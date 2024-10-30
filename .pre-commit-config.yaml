@@ -17,12 +17,6 @@ repos:
       - id: check-yaml
       - id: debug-statements
 
-  - repo: https://github.com/psf/black-pre-commit-mirror
-    rev: 24.10.0
-    hooks:
-      - id: black
-        language_version: python3.12
-
   - repo: https://github.com/asottile/pyupgrade
     rev: v3.19.0
     hooks:
@@ -52,6 +46,12 @@ repos:
       - id: codespell
         additional_dependencies:
           - tomli
+
+  - repo: https://github.com/agritheory/black
+    rev: 951ccf4d5bb0d692b457a5ebc4215d755618eb68
+    hooks:
+      - id: black
+
 
 ci:
   autoupdate_schedule: weekly
