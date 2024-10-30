@@ -33,6 +33,60 @@ docker compose build mqtt-pg-logger
 docker compose up --watch
 ```
 
+## Setting up TLS
+
+### 1. Generating certificates 
+This specific example is meant for Let's Encrypt certificates. If you already have obtained certificates skip to he next step.
+
+1. Install [certbot](https://certbot.eff.org/)
+2. We want to obtain a certificate but not "install" it so we must run `certbot` in `certonly` mode 
+3. Additionally we will need to use either the [standalone](https://eff-certbot.readthedocs.io/en/stable/using.html#standalone) or a [DNS Plugin](https://eff-certbot.readthedocs.io/en/stable/using.html#dns-plugins) to authenticate. 
+
+Example - 
+```
+sudo certbot certonly --standalone -d [domain.name] 
+```
+
+### 2. Making certificates compatible for ActiveMQ Artemis
+Artemis, being Java based, doesn't directly work with `.pem` files. We need to create a Java Keystore file (`.jks`) and load up our certificates into that file. 
+
+1. Install the Java JRE, we need this for the `keytool` CLI utility that we'll use to create a keystore
+2. We need to convert our `.pem` files into the PKCS12 format. This will ask for an "Export Password", for this we can use a temporary password that we will use in the next step.
+
+```
+sudo openssl pkcs12 -export -out fullchain.p12 -in /etc/letsencrypt/live/[domain.name]/fullchain.pem -inkey /etc/letsencrypt/live/[domain.name]/privkey.pem -name "le_cert"
+```
+
+3. Load the PKCS12 file into a new Java keystore
+The password you use to create the keystore will be used to configure Artemis in the next step, so make sure to store it safely. [export_password] is the password we set in the previous step.
+```
+sudo keytool -importkeystore -deststorepass [password] -destkeypass [password] -destkeystore le_keystore.jks -srckeystore fullchain.p12 -srcstoretype PKCS12 -srcstorepass [export_password]
+```
+ The `fullchain.p12` file can be now safely deleted. 
+
+### 3. Configuring ActiveMQ Artemis
+
+1. Create a new folder called `certs` and move your Java keystore file into it (`le_keystore.jks` if you have followed the previous steps)
+2. Create a new `broker.xml` file using the `broker.xml.sample` and update the `acceptor` values with the right certificate path and password
+3. Update the `docker-compose.prod.yml` file with the right certificate path and password
+
+### Renewing certificates 
+
+1. Renew certificates
+You can renew certificates normally by running `certbot renew`
+2. Remove old certificate from the keystore 
+```
+sudo keytool -delete -alias le_cert -keystore ./le_keystore.jks
+```
+3. Convert new certificate to pkcs12 - Same as above
+```
+sudo openssl pkcs12 -export -out fullchain.p12 -in /etc/letsencrypt/live/[domain.name]/fullchain.pem -inkey /etc/letsencrypt/live/[domain.name]/privkey.pem -name "le_cert"
+```
+4. Load the certificate to keystore - Same as above
+```
+sudo keytool -importkeystore -deststorepass [password] -destkeypass [password] -destkeystore le_keystore.jks -srckeystore fullchain.p12 -srcstoretype PKCS12 -srcstorepass [export_password]
+```
+
 ## Manual
 
 ### Prerequisites
@@ -176,8 +230,3 @@ The code is available at [GitHub][home].
 
 [home]: https://github.com/rosenloecher-it/mqtt-pg-logger
 
-## Setting up certs 
-
-Use DNS Verification with Certbot to generate certificates (how to automate?)
-sudo openssl pkcs12 -export -out fullchain.p12 -in /etc/letsencrypt/live/artemis.falk.host/fullchain.pem -inkey /etc/letsencrypt/live/artemis.falk.host/privkey.pem
-sudo keytool -importkeystore -deststorepass securepass -destkeypass securepass -destkeystore le_keystore.jks -srckeystore fullchain.p12 -srcstoretype PKCS12 -srcstorepass securepass
