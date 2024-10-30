@@ -5,14 +5,17 @@
 cd /mqtt-pg-logger
 cp mqtt-pg-logger.yaml.sample mqtt-pg-logger.yaml
 chmod 600 mqtt-pg-logger.yaml
-sed -i -e "s#<your[_ ]broker>#${MQTT_HOST}#g" \
-    -e "s#<your[_ ]database[_ ]password>#${POSTGRES_PASSWORD}#g" \
-    -e "s#<your[_ ]database[_ ]user>#${POSTGRES_USER}#g" \
-    -e "s#<your[_ ]database[_ ]name>#${POSTGRES_DATABASE}#g" \
-    -e "s#<your[_ ]database[_ ]host>#${POSTGRES_HOST}#g" \
-    -e "s#<your_mqtt_user>#${MQTT_USER}#g" \
-    -e "s#<your_mqtt_password>#${MQTT_PASSWORD}#g" \
-    -e "s#<path_to_your_ca_cert>#${CA_CERT_PATH}#g" \
+sed -i -e "s#<broker>#${MQTT_HOST}#g" \
+    -e "s#<database_password>#${DATABASE_PASSWORD}#g" \
+    -e "s#<database_user>#${DATABASE_USER}#g" \
+    -e "s#<database_name>#${DATABASE_NAME}#g" \
+    -e "s#<database_host>#${DATABASE_HOST}#g" \
+    -e "s#<database_port>#${DATABASE_PORT}#g" \
+    -e "s#<mqtt_host>#${MQTT_HOST}#g" \
+    -e "s#<mqtt_user>#${MQTT_USER}#g" \
+    -e "s#<mqtt_password>#${MQTT_PASSWORD}#g" \
+    -e "s#<mqtt_port>#${MQTT_PORT}#g" \
+    -e "s#<ssl_insecure>#${SSL_INSECURE}#g" \
     mqtt-pg-logger.yaml
 
 cat mqtt-pg-logger.yaml
