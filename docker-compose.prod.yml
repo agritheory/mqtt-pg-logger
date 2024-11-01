@@ -8,9 +8,10 @@ services:
       - 8883:8883 # MQTT Port with TLS
     volumes:
     - ./certs:/etc/ssl/certs
-    - ./broker.xml:/var/lib/artemis-instance/etc-override/broker.xml
+    - ./etc-override:/var/lib/artemis-instance/etc-override # broker.xml override
+    -  artemis-data:/var/lib/artemis-instance/data 
     environment:
-    - EXTRA_ARGS=--http-host 0.0.0.0 --relax-jolokia --ssl-key /etc/ssl/certs/le_keystore.jks --ssl-key-password securepass
+    - EXTRA_ARGS=--http-host 0.0.0.0 --relax-jolokia --ssl-key /etc/ssl/certs/[keystore.jks] --ssl-key-password [password] # Needed for Web Console HTTPs
     restart: unless-stopped
 
   mqtt-pg-logger:
@@ -23,8 +24,8 @@ services:
       - artemis
       - timescaledb
     environment:
-      - MQTT_HOST=artemis
-      - MQTT_PORT=8883 # Set to 8883 when using TLS
+      - MQTT_HOST=artemis.falk.host
+      - MQTT_PORT=8883 
       - MQTT_USER=artemis
       - MQTT_PASSWORD=artemis
       - DATABASE_HOST=timescaledb
@@ -32,7 +33,7 @@ services:
       - DATABASE_PASSWORD=postgres
       - DATABASE_NAME=postgres
       - DATABASE_PORT=5432
-      - SSL_INSECURE=False # Set to False when using TLS
+      - SSL_INSECURE=False
     restart: unless-stopped
 
   timescaledb:
@@ -43,7 +44,10 @@ services:
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_USER=postgres
       - POSTGRES_DB=postgres
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
     restart: unless-stopped
 
 volumes:
-  artemis-config:
+  artemis-data:
+  timescaledb-data:
