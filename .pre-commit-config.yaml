@@ -52,7 +52,6 @@ repos:
     hooks:
       - id: black
 
-
 ci:
   autoupdate_schedule: weekly
   skip: []
