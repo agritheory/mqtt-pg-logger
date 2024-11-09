@@ -6,11 +6,6 @@ services:
       - 61616:61616 # Main Messaging Port
       - 1883:1883 # MQTT Port
       - 8883:8883 # MQTT Port with TLS
-    # volumes: # Uncomment when using TLS
-    # - ./certs:/etc/ssl/certs
-    # - ./broker.xml:/var/lib/artemis-instance/etc-override/broker.xml
-    # environment:
-    # - EXTRA_ARGS=--http-host 0.0.0.0 --relax-jolokia --ssl-key /etc/ssl/certs/le_keystore.jks --ssl-key-password securepass
     restart: unless-stopped
 
   mqtt-pg-logger:
@@ -24,7 +19,7 @@ services:
       - timescaledb
     environment:
       - MQTT_HOST=artemis
-      - MQTT_PORT=1883 # Set to 8883 when using TLS
+      - MQTT_PORT=1883
       - MQTT_USER=artemis
       - MQTT_PASSWORD=artemis
       - DATABASE_HOST=timescaledb
@@ -32,7 +27,7 @@ services:
       - DATABASE_PASSWORD=postgres
       - DATABASE_NAME=postgres
       - DATABASE_PORT=5432
-      - SSL_INSECURE=True # Set to False when using TLS
+      - SSL_INSECURE=True
     restart: unless-stopped
 
   timescaledb:
@@ -44,6 +39,3 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_DB=postgres
     restart: unless-stopped
-
-volumes:
-  artemis-config:

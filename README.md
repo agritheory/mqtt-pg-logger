@@ -8,7 +8,7 @@ Collects [MQTT](https://en.wikipedia.org/wiki/MQTT) messages and stores them in 
 
 ## Docker
 
-### Quickstart
+### Development Quick-start
 
 ```docker compose up```
 
@@ -18,7 +18,7 @@ The docker compose file is setup to run
 - ActiveMQ Artemis
 - TimescaleDB
 
-All configuration is done via env vars in the docker compose file, and default configuration is setup to just work out of the box.
+All configuration is done via env vars in the docker compose file, and default configuration is setup to just work out of the box. By default ActiveMQ Artemis and TimescaleDB are not setup for data persistence so when the containers are shut down the data will be lost. 
 
 **Ports**
 - `8161` - Artemis Web UI
@@ -67,7 +67,7 @@ sudo keytool -importkeystore -deststorepass [password] -destkeypass [password] -
 ### 3. Configuring ActiveMQ Artemis
 
 1. Create a new folder called `certs` and move your Java keystore file into it (`le_keystore.jks` if you have followed the previous steps)
-2. Create a new `broker.xml` file using the `broker.xml.sample` and update the `acceptor` values with the right certificate path and password
+2. Create a new `broker.xml` file using the `broker.xml.sample` inside the `etc-override` folder and update the `acceptor` values with the right certificate path and password
 3. Update the `docker-compose.prod.yml` file with the right certificate path and password
 
 ### Renewing certificates 
@@ -86,6 +86,58 @@ sudo openssl pkcs12 -export -out fullchain.p12 -in /etc/letsencrypt/live/[domain
 ```
 sudo keytool -importkeystore -deststorepass [password] -destkeypass [password] -destkeystore le_keystore.jks -srckeystore fullchain.p12 -srcstoretype PKCS12 -srcstorepass [export_password]
 ```
+
+## Infrastructure Overview
+
+This an overview of how the infrastructure around mqtt-pg-logger works and how it is configured 
+
+![image](https://github.com/user-attachments/assets/91598a2f-9d95-4e59-bbaf-d03d62134d58)
+
+### ActiveMQ Artemis
+ActiveMQ Artemis is a high performance and scalable message broker. It works with many protocols, but we only care about MQTT in our case. This is the bridge between our SCADA system and the rest of our software infra. 
+
+#### Configuration
+Note - For running ActiveMQ Artemis for development, no configuration is needed, everything should work out of the box when you spin up the `docker-compose.yml` file. For production there is a separate compose file named `docker-compose.prod.yml` which contains additional configuration which is explained below.
+
+[Official Docs for Docker](https://activemq.apache.org/components/artemis/documentation/latest/docker.html)
+
+Configuration for ActiveMQ Artemis is stored in the `broker.xml` file that is mounted into the Docker container at runtime. The prebuilt image allows us to drop a file in a specific directory that then gets copied over when the container is spun up. The only keys that we care about the in the `broker.xml` are the `<acceptor>` keys. The sample `broker.xml.sample` file is modified in a way that TLS configuration can be easily set. Below is the MQTT acceptor configuration that's been updated to use SSL. Only the `[keystore.jks]` and the `[password]` values need to be updated. Detailed information on how to enable SSL can be found in the "Setting up TLS" section above. 
+
+```
+<acceptor name="mqtt">tcp://0.0.0.0:8883?sslEnabled=true;keyStorePath=/etc/ssl/certs/[keystore.jks];keyStorePassword=[password];tcpSendBufferSize=1048576;tcpReceiveBufferSize=1048576;protocols=MQTT;useEpoll=true</acceptor>
+```
+
+Certificates generated for TLS are mounted to the `/etc/ssl/certs` directory and the data for Artemis is stored in a Docker volume. 
+
+```
+    volumes:
+    - ./certs:/etc/ssl/certs
+    - ./etc-override:/var/lib/artemis-instance/etc-override # broker.xml override
+    -  artemis-data:/var/lib/artemis-instance/data 
+```
+
+Additionally the `EXTRA_ARGS` environment variable is passed with some extra arguments for the Artemis Web Console to use the certificates and enable HTTPS
+
+```
+    environment:
+    - EXTRA_ARGS=--http-host 0.0.0.0 --relax-jolokia --ssl-key /etc/ssl/certs/[keystore.jks] --ssl-key-password [password] # Needed for Web Console HTTPs
+```
+
+### MQTT PG Logger 
+This piece simply subscribes to topics on Artemis, and pushes whatever data it gets into a Timescale DB 
+
+#### Configuration
+All configuration is done via environment variables passed in the `docker-compose.yml` file. Development and Production configurations the same except for a single environment variable, `SSL_INSECURE` that disables SSL checks when set to `True`. For a development setup this is set to `True` by default. 
+
+When the container is spun up, the environment variables are then used to generate a `mqtt-pg-logger.yaml` file in the `entrypoint.sh` script. Ideally down the line we should remove the configuration file genreration and update the application to just use environment variables directly. 
+
+### Timescale DB 
+This a time series database based on Postgres that stores our MQTT data. 
+
+#### Configuration
+[Official Docs for Docker](https://docs.timescale.com/self-hosted/latest/install/installation-docker/)
+
+This is a very straightforward deployment. All configuration is done via environment variables. Development and Production configurations the same except for the fact that the data is setup to be persistent for production deployments.
 
 ## Manual
 
