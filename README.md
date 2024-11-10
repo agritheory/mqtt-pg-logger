@@ -323,6 +323,11 @@ flowchart LR
     class external_mqtt,external_api external;
 ```
 
+
+
+
+
+
 # GraphQL API
 A token can be obtained by using the following mutation.
 

@@ -4,7 +4,7 @@ services:
     networks:
       - app-network
     ports:
-      - 8161:8161 # Web Console
+      - ${ARTEMIS_WEB_CONSOLE_PORT:-8161}:8161 # Web Console
       - 61616:61616 # Main Messaging Port
       - 1883:1883 # MQTT Port
       - 8883:8883 # MQTT Port with TLS
@@ -16,7 +16,7 @@ services:
     environment:
      - EXTRA_ARGS=--http-host 0.0.0.0 --relax-jolokia
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8161"]
+      test: ["CMD", "curl", "-f", "http://localhost:${ARTEMIS_WEB_CONSOLE_PORT:-8161}"]
       interval: 30s
       timeout: 10s
       retries: 3

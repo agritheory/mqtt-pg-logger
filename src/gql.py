@@ -2,6 +2,7 @@ import datetime
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 import strawberry
 from cryptography.fernet import Fernet
 from environs import Env
@@ -9,7 +10,7 @@ from quart import Blueprint, Response, current_app, jsonify, request
 from strawberry.asgi import GraphQL
 from strawberry.types import Info
 
-from src.auth import generate_token, token_blacklist, verify_token
+from src.auth import generate_token, token_blacklist, token_required, verify_token
 
 graphql_bp = Blueprint("graphql", __name__)
 
@@ -88,14 +89,21 @@ class UserInput:
 	disabled: bool = False
 
 
+@strawberry.type
+class Health:
+	status: str
+	timestamp: datetime.datetime
+	mqtt_connection: str
+	artemis_status: str
+	timescaledb_status: str
+
+
 # Queries
 @strawberry.type
 class Query:
 	@strawberry.field
+	@token_required
 	async def get_topics(self, info: Info[Context, Any]) -> list[Topic]:
-		if not info.context.user:
-			raise Exception("Not authenticated")
-
 		query = """
 			SELECT id, topic, disabled, creation, modified, owner, modified_by
 			FROM topic
@@ -107,9 +115,8 @@ class Query:
 		return [Topic(**row) for row in rows]
 
 	@strawberry.field
+	@token_required
 	async def get_topic(self, info: Info, topic_id: int) -> Topic | None:
-		if not info.context.user:
-			raise Exception("Not authenticated")
 		query = """
 		SELECT id, topic, disabled, creation, modified, owner, modified_by
 		FROM topic
@@ -119,9 +126,8 @@ class Query:
 		return Topic(**row) if row else None
 
 	@strawberry.field
+	@token_required
 	async def get_users(self, info: Info) -> list[User]:
-		if not info.context.user:
-			raise Exception("Not authenticated")
 		query = """
 		SELECT id, username, disabled, creation, modified, owner, modified_by
 		FROM "user"
@@ -132,9 +138,8 @@ class Query:
 		return [User(**row) for row in rows]
 
 	@strawberry.field
+	@token_required
 	async def get_user(self, info: Info, user_id: int) -> User | None:
-		if not info.context.user:
-			raise Exception("Not authenticated")
 		query = """
 		SELECT id, username, disabled, creation, modified, owner, modified_by
 		FROM "user"
@@ -142,6 +147,47 @@ class Query:
 		"""
 		row = await current_app.db.fetch_one(query=query, values={"user_id": user_id})
 		return User(**row) if row else None
+
+	@strawberry.field
+	@token_required
+	async def health(self, info: Info[Context, Any]) -> Health:
+		env = Env()
+		health_status = Health(
+			status="ok",
+			timestamp=datetime.datetime.utcnow(),
+			timescaledb_status="ok",
+			artemis_status="ok",
+			mqtt_connection="ok",
+		)
+
+		if hasattr(current_app, "db"):
+			try:
+				await current_app.db.execute("SELECT 1")
+			except Exception as e:
+				health_status.status = "error"
+				health_status.timescaledb_status = str(e)
+
+		if hasattr(current_app, "mqtt_logger"):
+			if not current_app.mqtt_logger.client.is_connected():
+				health_status.status = "error"
+				health_status.mqtt_connection = "disconnected"
+
+		mqtt_broker_url = env.str("MQTT_BROKER_HOST ", "artemis")
+		mqtt_broker_web_console_port = env.int("MQTT_BROKER_WEB_CONSOLE_PORT", 8161)
+		try:
+			async with httpx.AsyncClient() as client:
+				response = await client.get(
+					f"http://{mqtt_broker_url}:{mqtt_broker_web_console_port}/",
+					follow_redirects=True,
+				)
+				if response.status_code != 200:
+					health_status.status = "error"
+					health_status.artemis_status = f"Artemis UI responded with status code {response.status_code}"
+		except Exception as e:
+			health_status.status = "error"
+			health_status.artemis_status = str(e)
+
+		return health_status
 
 
 # Mutations
@@ -189,16 +235,14 @@ class Mutation:
 		)
 
 	@strawberry.mutation
+	@token_required
 	async def logout(self, info: Info[Context, Any]) -> bool:
-		if not info.context.user:
-			raise Exception("Not authenticated")
 		token_blacklist.add(info.context.user["jti"])
 		return True
 
 	@strawberry.mutation
+	@token_required
 	async def create_topic(self, info: Info, input: TopicInput) -> Topic:
-		if not info.context.user:
-			raise Exception("Not authenticated")
 		username = info.context.user.username
 		query = """
 		INSERT INTO topic (topic, disabled, owner, modified_by)
@@ -215,9 +259,8 @@ class Mutation:
 		return Topic(**row)
 
 	@strawberry.mutation
+	@token_required
 	async def update_topic(self, info: Info, id: int, input: TopicInput) -> Topic:
-		if not info.context.user:
-			raise Exception("Not authenticated")
 		username = info.context.user.username
 		query = """
 		UPDATE topic
@@ -233,9 +276,8 @@ class Mutation:
 		return Topic(**row)
 
 	@strawberry.mutation
+	@token_required
 	async def create_user(self, info: Info, input: UserInput) -> User:
-		if not info.context.user:
-			raise Exception("Not authenticated")
 		username = info.context.user.username
 		env = Env()
 		f = Fernet(env.str("FERNET_KEY").encode())
@@ -257,9 +299,8 @@ class Mutation:
 		return User(**row)
 
 	@strawberry.mutation
+	@token_required
 	async def update_user(self, info: Info, id: int, input: UserInput) -> User:
-		if not info.context.user:
-			raise Exception("Not authenticated")
 		username = info.context.user.username
 
 		query = """
