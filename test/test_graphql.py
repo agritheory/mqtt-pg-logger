@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import json
 
 import pytest
@@ -34,11 +32,12 @@ def login_mutation():
 
 
 @pytest.fixture
-def me_query():
+def topics_query():
 	return """
 		query {
-			me {
-				username
+			getTopics {
+				topic
+				creation
 			}
 		}
 	"""
@@ -49,6 +48,21 @@ def logout_mutation():
 	return """
 		mutation {
 			logout
+		}
+	"""
+
+
+@pytest.fixture
+def refresh_token_mutation():
+	return """
+		mutation {
+			refreshToken(input: {refreshToken: "valid_refresh_token"}) {
+				message
+				accessToken
+				refreshToken
+				tokenType
+				expiresIn
+			}
 		}
 	"""
 
@@ -66,7 +80,6 @@ async def execute_graphql(client, query, token=None):
 @pytest.mark.asyncio
 async def test_successful_login(test_client, login_mutation):
 	response = await execute_graphql(test_client, login_mutation)
-	print(response)
 	assert "data" in response
 	assert "login" in response["data"]
 	assert response["data"]["login"]["message"] == "Login successful"
@@ -93,50 +106,44 @@ async def test_failed_login(test_client):
 
 
 @pytest.mark.asyncio
-async def test_me_query_with_valid_token(test_client, login_mutation, me_query):
-	# First login to get token
+async def test_topics_query_with_valid_token(test_client, login_mutation, topics_query):
 	login_response = await execute_graphql(test_client, login_mutation)
 	token = login_response["data"]["login"]["accessToken"]
-
-	# Then query me endpoint
-	response = await execute_graphql(test_client, me_query, token)
+	response = await execute_graphql(test_client, topics_query, token)
 
 	assert "data" in response
-	assert "me" in response["data"]
-	assert response["data"]["me"]["username"] == "admin"
+	assert "getTopics" in response["data"]
+	assert len(response["data"]["getTopics"]) > 0
 
 
 @pytest.mark.asyncio
-async def test_me_query_without_token(test_client, me_query):
-	response = await execute_graphql(test_client, me_query)
+async def test_topics_query_without_token(test_client, topics_query):
+	response = await execute_graphql(test_client, topics_query)
 
 	assert "errors" in response
 	assert "Not authenticated" in response["errors"][0]
 
 
 @pytest.mark.asyncio
-async def test_me_query_with_invalid_token(test_client, me_query):
-	response = await execute_graphql(test_client, me_query, "invalid_token")
+async def test_topics_query_with_invalid_token(test_client, topics_query):
+	response = await execute_graphql(test_client, topics_query, "invalid_token")
 
 	assert "errors" in response
 	assert "Not authenticated" in response["errors"][0]
 
 
 @pytest.mark.asyncio
-async def test_successful_logout(test_client, login_mutation, logout_mutation, me_query):
-	# First login to get token
+async def test_successful_logout(test_client, login_mutation, logout_mutation, topics_query):
 	login_response = await execute_graphql(test_client, login_mutation)
 	token = login_response["data"]["login"]["accessToken"]
 
-	# Then logout
 	logout_response = await execute_graphql(test_client, logout_mutation, token)
 	assert "data" in logout_response
 	assert logout_response["data"]["logout"] is True
 
-	# Verify token is no longer valid by trying to use it
-	me_response = await execute_graphql(test_client, me_query, token)
-	assert "errors" in me_response
-	assert "Not authenticated" in me_response["errors"][0]
+	topics_response = await execute_graphql(test_client, topics_query, token)
+	assert "errors" in topics_response
+	assert "Not authenticated" in topics_response["errors"][0]
 
 
 @pytest.mark.asyncio
@@ -156,20 +163,40 @@ async def test_logout_with_invalid_token(test_client, logout_mutation):
 
 
 @pytest.mark.asyncio
-async def test_using_token_after_logout(test_client, login_mutation, logout_mutation, me_query):
-	# Login to get token
+async def test_using_token_after_logout(
+	test_client, login_mutation, logout_mutation, topics_query
+):
 	login_response = await execute_graphql(test_client, login_mutation)
 	token = login_response["data"]["login"]["accessToken"]
 
-	# First verify token works
-	me_response = await execute_graphql(test_client, me_query, token)
-	assert "data" in me_response
-	assert me_response["data"]["me"]["username"] == "admin"
+	topics_response = await execute_graphql(test_client, topics_query, token)
+	assert "data" in topics_response
+	assert len(topics_response["data"]["getTopics"]) > 0
 
-	# Logout
 	await execute_graphql(test_client, logout_mutation, token)
 
-	# Try to use token again
-	me_response_after_logout = await execute_graphql(test_client, me_query, token)
-	assert "errors" in me_response_after_logout
-	assert "Not authenticated" in me_response_after_logout["errors"][0]
+	topics_response_after_logout = await execute_graphql(test_client, topics_query, token)
+	assert "errors" in topics_response_after_logout
+	assert "Not authenticated" in topics_response_after_logout["errors"][0]
+
+
+@pytest.mark.asyncio
+async def test_successful_token_refresh(test_client, login_mutation, refresh_token_mutation):
+	login_response = await execute_graphql(test_client, login_mutation)
+	refresh_token = login_response["data"]["login"]["refreshToken"]
+
+	refresh_response = await execute_graphql(test_client, refresh_token_mutation, refresh_token)
+	assert "data" in refresh_response
+	assert "refreshToken" in refresh_response["data"]
+	assert refresh_response["data"]["refreshToken"]["message"] == "Token refresh successful"
+	assert "accessToken" in refresh_response["data"]["refreshToken"]
+	assert "refreshToken" in refresh_response["data"]["refreshToken"]
+	assert refresh_response["data"]["refreshToken"]["tokenType"] == "bearer"
+	assert refresh_response["data"]["refreshToken"]["expiresIn"] > 0
+
+
+@pytest.mark.asyncio
+async def test_failed_token_refresh(test_client, refresh_token_mutation):
+	response = await execute_graphql(test_client, refresh_token_mutation, "invalid_refresh_token")
+	assert "errors" in response
+	assert "Invalid refresh token" in response["errors"][0]

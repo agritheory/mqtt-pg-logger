@@ -58,4 +58,4 @@ def main():
 	env = Env()
 	env.read_env()
 	app = create_app()
-	app.run(host=env.str("HOST"), port=env.int("PORT"))
+	app.run(host=env.str("HOST"), port=env.int("PORT"), debug=True)

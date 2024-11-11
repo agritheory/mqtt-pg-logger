@@ -32,6 +32,7 @@ def token_required(func):
 			raise Exception("Invalid or expired token")
 
 		kwargs["info"].context.user = decoded_token
+
 		return await func(*args, **kwargs)
 
 	return wrapper

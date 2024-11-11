@@ -1,4 +1,3 @@
-import asyncio
 import logging
 
 from cryptography.fernet import Fernet
@@ -69,7 +68,7 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 			id SERIAL PRIMARY KEY,
 			username TEXT NOT NULL UNIQUE,
 			password_hash BYTEA,
-			token BYTEA,
+			refresh_token BYTEA,
 			disabled BOOLEAN NOT NULL DEFAULT FALSE,
 			creation TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -217,7 +216,7 @@ async def create_admin_user(
 
 	if not exists:
 		# The encrypted password is already bytes, don't decode it
-		encrypted_password = fernet.encrypt(admin_password.encode())
+		encrypted_password = fernet.encrypt(admin_password.encode()) if admin_password else None
 		query = """
 		INSERT INTO "user" (username, password_hash, disabled, owner, modified_by)
 		VALUES (:username, :password, false, :owner, :modified_by)
@@ -265,16 +264,10 @@ async def initialize_db():
 			if all([fernet_key, admin_email, admin_password]):
 				fernet = Fernet(fernet_key)
 				await create_admin_user(db, fernet, admin_email, admin_password)
+
+			mqtt_user = env.str("MQTT_USER")
+			if fernet_key and mqtt_user:
+				await create_admin_user(db, fernet, mqtt_user, None)
+
 	finally:
 		await db.disconnect()
-
-
-def main():
-	"""Entry point for schema creation"""
-	_logger.info("Creating database schema...")
-	asyncio.run(initialize_db())
-	_logger.info("Schema creation completed")
-
-
-if __name__ == "__main__":
-	main()

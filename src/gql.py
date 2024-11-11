@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+import jwt
 import strawberry
 from cryptography.fernet import Fernet
 from environs import Env
@@ -15,29 +16,6 @@ from src.auth import generate_token, token_blacklist, token_required, verify_tok
 graphql_bp = Blueprint("graphql", __name__)
 
 
-@dataclass
-class Context:
-	user: dict | None = None
-
-
-async def get_context() -> Context:
-	auth_header = request.headers.get("Authorization")
-	context = Context()
-
-	if auth_header:
-		try:
-			scheme, token = auth_header.split()
-			if scheme.lower() == "bearer":
-				decoded_token = verify_token(token)
-				if decoded_token:
-					context.user = decoded_token
-		except ValueError:
-			pass
-
-	return context
-
-
-# Type definitions
 @strawberry.type
 class User:
 	id: int
@@ -47,6 +25,14 @@ class User:
 	modified: datetime.datetime
 	owner: str
 	modified_by: str
+	exp: strawberry.Private[object]
+	iat: strawberry.Private[object]
+	jti: strawberry.Private[object]
+
+
+@dataclass
+class Context:
+	user: dict | User | None = None
 
 
 @strawberry.type
@@ -64,6 +50,11 @@ class LoginInput:
 	password: str
 
 
+@strawberry.input
+class RefreshTokenInput:
+	refresh_token: str
+
+
 @strawberry.type
 class Topic:
 	id: int
@@ -75,7 +66,6 @@ class Topic:
 	modified_by: str
 
 
-# Input types
 @strawberry.input
 class TopicInput:
 	topic: str
@@ -98,7 +88,6 @@ class Health:
 	timescaledb_status: str
 
 
-# Queries
 @strawberry.type
 class Query:
 	@strawberry.field
@@ -190,7 +179,6 @@ class Query:
 		return health_status
 
 
-# Mutations
 @strawberry.type
 class Mutation:
 	@strawberry.mutation
@@ -220,16 +208,49 @@ class Mutation:
 		except Exception:
 			raise Exception("Invalid credentials")
 
-		# Generate tokens
 		access_token = generate_token(user["username"], {})
 		refresh_token = generate_token(
 			user["username"], {}, expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES"))
+		)
+
+		await current_app.db.execute(
+			'UPDATE "user" SET refresh_token = :refresh_token WHERE id = :user_id',
+			values={"refresh_token": bytes(refresh_token.encode()), "user_id": user["id"]},
 		)
 
 		return AuthResponse(
 			message="Login successful",
 			access_token=access_token,
 			refresh_token=refresh_token,
+			token_type="bearer",
+			expires_in=env.int("ACCESS_TOKEN_EXPIRES"),
+		)
+
+	@strawberry.mutation
+	async def refresh_token(self, info: Info[Context, Any], input: RefreshTokenInput) -> AuthResponse:
+		env = Env()
+		try:
+			verify_token(input.refresh_token)
+		except jwt.exceptions.InvalidTokenError:
+			raise Exception("Invalid refresh token")
+
+		user = await load_user_context(info.context.user)
+		if user["refresh_token"] != input.refresh_token:
+			raise Exception("Invalid refresh token")
+
+		new_access_token = generate_token(user.username, {})
+		new_refresh_token = generate_token(
+			user.username, {}, expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES"))
+		)
+		await current_app.db.execute(
+			'UPDATE "user" SET refresh_token = :refresh_token WHERE id = :user_id',
+			values={"refresh_token": new_refresh_token, "user_id": user["id"]},
+		)
+
+		return AuthResponse(
+			message="Token refresh successful",
+			access_token=new_access_token,
+			refresh_token=new_refresh_token,
 			token_type="bearer",
 			expires_in=env.int("ACCESS_TOKEN_EXPIRES"),
 		)
@@ -243,7 +264,7 @@ class Mutation:
 	@strawberry.mutation
 	@token_required
 	async def create_topic(self, info: Info, input: TopicInput) -> Topic:
-		username = info.context.user.username
+		user = await load_user_context(info.context.user)
 		query = """
 		INSERT INTO topic (topic, disabled, owner, modified_by)
 		VALUES (:topic, :disabled, :owner, :modified_by)
@@ -252,8 +273,8 @@ class Mutation:
 		values = {
 			"topic": input.topic,
 			"disabled": input.disabled,
-			"owner": username,
-			"modified_by": username,
+			"owner": user.username,
+			"modified_by": user.username,
 		}
 		row = await current_app.db.fetch_one(query=query, values=values)
 		return Topic(**row)
@@ -261,7 +282,7 @@ class Mutation:
 	@strawberry.mutation
 	@token_required
 	async def update_topic(self, info: Info, id: int, input: TopicInput) -> Topic:
-		username = info.context.user.username
+		user = await load_user_context(info.context.user)
 		query = """
 		UPDATE topic
 		SET topic = :topic,
@@ -271,18 +292,23 @@ class Mutation:
 		WHERE id = :id
 		RETURNING id, topic, disabled, creation, modified, owner, modified_by
 		"""
-		values = {"id": id, "topic": input.topic, "disabled": input.disabled, "modified_by": username}
+		values = {
+			"id": id,
+			"topic": input.topic,
+			"disabled": input.disabled,
+			"modified_by": user.username,
+		}
 		row = await current_app.db.fetch_one(query=query, values=values)
 		return Topic(**row)
 
 	@strawberry.mutation
 	@token_required
 	async def create_user(self, info: Info, input: UserInput) -> User:
-		username = info.context.user.username
+		user = await load_user_context(info.context.user)
 		env = Env()
 		f = Fernet(env.str("FERNET_KEY").encode())
 
-		encrypted_password = f.encrypt(input.password.encode())
+		encrypted_password = f.encrypt(input.password.encode()) if input.password else ""
 		query = """
 		INSERT INTO "user" (username, password_hash, disabled, owner, modified_by)
 		VALUES (:username, :password, :disabled, :owner, :modified_by)
@@ -292,8 +318,8 @@ class Mutation:
 			"username": input.username,
 			"password": encrypted_password,
 			"disabled": input.disabled,
-			"owner": username,
-			"modified_by": username,
+			"owner": user.username,
+			"modified_by": user.username,
 		}
 		row = await current_app.db.fetch_one(query=query, values=values)
 		return User(**row)
@@ -301,8 +327,7 @@ class Mutation:
 	@strawberry.mutation
 	@token_required
 	async def update_user(self, info: Info, id: int, input: UserInput) -> User:
-		username = info.context.user.username
-
+		user = await load_user_context(info.context.user)
 		query = """
 		UPDATE "user"
 		SET username = :username,
@@ -318,7 +343,7 @@ class Mutation:
 			"username": input.username,
 			"password": Fernet.encrypt(input.password.encode()),
 			"disabled": input.disabled,
-			"modified_by": username,
+			"modified_by": user.username,
 		}
 		row = await current_app.db.fetch_one(query=query, values=values)
 		return User(**row)
@@ -381,3 +406,33 @@ async def graphql_handler():
 		)
 
 	return jsonify({"errors": ["Invalid Content-Type"]}), 400
+
+
+async def get_context() -> Context:
+	auth_header = request.headers.get("Authorization")
+	context = Context()
+
+	if auth_header:
+		try:
+			scheme, token = auth_header.split()
+			if scheme.lower() == "bearer":
+				decoded_token = verify_token(token)
+				if decoded_token:
+					context.user = decoded_token
+		except ValueError:
+			pass
+
+	return context
+
+
+async def load_user_context(user_context):
+	query = """
+	SELECT id, username, disabled, creation, modified, owner, modified_by
+	FROM "user"
+	WHERE username = :username
+	"""
+	row = await current_app.db.fetch_one(query=query, values={"username": user_context.pop("sub")})
+	user = User(**row, **user_context) if row else None
+	if user.disabled:
+		raise Exception("User is disabled")
+	return user

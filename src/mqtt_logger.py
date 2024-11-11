@@ -24,8 +24,10 @@ class MQTTLogger:
 		self.identifier = env.str("MQTT_CLIENT_ID") or "mqtt-logger"
 		self.keepalive = env.int("MQTT_KEEPALIVE") or 1
 		self.protocol = env.int("MQTT_DEFAULT_PROTOCOL") or 5
-		self.topics = self.get_topics()
 		self.tls_params = {}
+		self.log_all_topics = env.bool("LOG_ALL_TOPICS", False)
+		self.allow_all_topics = env.bool("ALLOW_ALL_TOPICS", False)
+		self.topics = {"#"}
 
 		if not env.bool("SSL_INSECURE"):
 			# TODO not tested or implemented
@@ -49,15 +51,27 @@ class MQTTLogger:
 			_client.tls_params = self.tls_params
 		return _client
 
-	def get_topics(self):
-		return "#"
-		# TODO look up topics in database
+	async def get_topics(self):
+		query = """
+			SELECT id, topic, disabled, creation, modified, owner, modified_by
+			FROM topic
+			WHERE disabled = false
+			ORDER BY topic
+		"""
+
+		rows = await self.db.fetch_all(query=query)
+		print(rows)
+		if not rows:
+			return {"#"}  # fallback if no topics are configured
+		return {row["topic"] for row in rows}
 
 	async def start(self):
 		"""Start MQTT client and subscribe to topics"""
+		self.topics = self.topics if self.allow_all_topics else await self.get_topics()
 		try:
 			async with self.client() as client:
 				_logger.info(f"MQTT client connected to {self.broker_url}:{self.broker_port}")
+				_logger.info(f"Filtering on topics {self.topics}")
 				for topic in self.topics:
 					await client.subscribe(topic=topic, qos=1)
 
@@ -70,6 +84,16 @@ class MQTTLogger:
 			raise
 
 	async def store_message(self, message) -> None:
+		if not self.log_all_topics:
+			if message.topic not in self.topics:
+				_logger.warning(f"Topic not collected: '{message.topic}'")
+				return
+		else:
+			_logger.info(f"Topic added: '{message.topic}'")
+			await self.save_topic(message)
+		if not self.allow_all_topics:
+			if message.topic not in self.topics:
+				return
 		query = """
 			INSERT INTO pgqueuer
 			(topic, text, qos, retain, entrypoint, priority, status)
@@ -96,6 +120,21 @@ class MQTTLogger:
 		}
 		async with self.db.transaction():
 			await self.db.execute(query=query, values=values)
+
+	async def save_topic(self, message):
+		query = """
+		INSERT INTO topic (topic, disabled, owner, modified_by)
+		VALUES (:topic, :disabled, :owner, :modified_by)
+		RETURNING id
+		"""
+		values = {
+			"topic": message.topic,
+			"disabled": False,
+			"owner": self.username,
+			"modified_by": self.username,
+		}
+		async with self.db.transaction():
+			return await self.db.execute(query=query, values=values)
 
 	async def stop(self):
 		"""Stop the MQTT logger"""
