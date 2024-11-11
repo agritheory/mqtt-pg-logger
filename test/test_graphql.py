@@ -2,17 +2,12 @@ import json
 
 import pytest
 
-from src.server import start_app
-
-
-@pytest.fixture
-def app():
-	app = start_app()
-	return app
+from src.server import main
 
 
 @pytest.fixture
 def test_client(app):
+	app = main()
 	return app.test_client()
 
 
