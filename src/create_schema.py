@@ -230,18 +230,20 @@ async def create_admin_user(
 				"modified_by": admin_email,
 			},
 		)
-		_logger.info("Admin user created successfully")
+		_logger.info(f"{admin_email} user created successfully")
 
 
-def TimescaleDB() -> Database:
+def TimescaleDB(**kwargs) -> Database:
 	env = Env()
 	env.read_env()
 
-	db_url = (
-		f"postgresql://{env.str('DB_USER')}:{env.str('DB_PASSWORD')}"
-		f"@{env.str('DB_HOST')}:{env.str('DB_PORT', '5432')}"
-		f"/{env.str('DB_NAME')}"
-	)
+	db_user = kwargs.get("db_user") or env.str("DB_USER")
+	db_password = kwargs.get("db_user") or env.str("DB_PASSWORD")
+	db_host = kwargs.get("db_host") or env.str("DB_HOST")
+	db_port = kwargs.get("db_port") or env.str("DB_PORT", "5432")
+	db_name = kwargs.get("db_name") or env.str("DB_NAME")
+
+	db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 	return Database(db_url)
 
 

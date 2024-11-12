@@ -27,8 +27,10 @@ def create_app() -> Quart:
 	@app.before_serving
 	async def init_database():
 		await app.db.connect()
+
 		await mqtt_handler()
-		if env.bool("CREATE_SCHEMA", False):
+
+		if env.bool("CREATE_SCHEMA", True):
 			"""Initialize database before serving requests"""
 			_logger.info("Initializing database before serving...")
 			try:
@@ -55,7 +57,5 @@ def create_app() -> Quart:
 def main():
 	"""Entry point for the server"""
 	_logger.info("Starting MQTT-Quart-Logger server...")
-	env = Env()
-	env.read_env()
 	app = create_app()
 	app.run(host=env.str("HOST"), port=env.int("PORT"), debug=True)

@@ -1,128 +1,131 @@
 import asyncio
-from test.mqtt_publisher import MqttPublisher
-from test.setup_test import SetupTest
-from test.utils import create_config_file
+import datetime
+import json
+import warnings
+from collections.abc import AsyncGenerator
 
-import attr
+import aiomqtt
 import pytest
-import pytest_asyncio
-from pytest_postgresql import factories
+from environs import Env
 
-from src.app_config import AppConfig
-from src.constants import MqttConfKey
-from src.database import DatabaseConfKey
-from src.mqtt_pg_logger import run_service
+from src.create_schema import initialize_db
+from src.server import create_app
 
+env = Env()
 
-@attr.s
-class Subscription:
-	topic: str = attr.ib()
-	subscription: str | None = attr.ib()
-	skip: bool = attr.ib()
-
-
-@attr.s
-class SentMessage:
-	subscription: Subscription = attr.ib()
-	text: str = attr.ib()
-	message_id: int = attr.ib(default=None)
-
-
-postgresql_external = factories.postgresql_noproc(
-	user="postgres",
-	password="postgres",
+warnings.filterwarnings(
+	"ignore", message="The same attribute name/cookie name/salt is used by another QuartAuth instance"
 )
-postgresql = factories.postgresql("postgresql_external")
 
 
 @pytest.fixture
-def subscriptions():
-	test_config_data = SetupTest.read_test_config()
-	sub_base = test_config_data["mqtt"][MqttConfKey.TEST_SUBSCRIPTION_BASE]
+async def app():
+	app = create_app()
+	ctx = app.app_context()
+	await ctx.push()
 
-	return [
-		Subscription(
-			topic=sub_base + "/inside/log1",
-			subscription=sub_base + "/inside/#",
-			skip=False,
-		),
-		Subscription(
-			topic=sub_base + "/inside/log2",
-			subscription=sub_base + "/inside/#",
-			skip=False,
-		),
-		Subscription(topic=sub_base + "/outside", subscription=None, skip=True),
-	]
+	# First connect to DB
+	await app.db.connect()
+
+	# Initialize the database
+	try:
+		await initialize_db()
+	except Exception as e:
+		print(f"Database initialization error: {e}")
+		raise
+
+	# Run before serving functions
+	for startup in app.before_serving_funcs:
+		await startup()
+
+	# Wait for background tasks to start
+	await asyncio.sleep(2)
+
+	yield app
+
+	tasks = list(app.background_tasks)
+	for task in tasks:
+		if not task.done():
+			task.cancel()
+
+	pending_tasks = [t for t in tasks if not t.done()]
+	if pending_tasks:
+		try:
+			await asyncio.gather(*pending_tasks, return_exceptions=True)
+		except (asyncio.CancelledError, Exception) as e:
+			print(f"Task cleanup error: {e}")
+
+	await app.db.disconnect()
+	try:
+		await ctx.pop()
+	except Exception as e:
+		pass
 
 
 @pytest.fixture
-def topics(subscriptions):
-	return [s.subscription for s in subscriptions if s.subscription]
+async def mqtt_client() -> AsyncGenerator[aiomqtt.Client, None]:
+	username = env.str("MQTT_USER", "artemis")
+	password = env.str("MQTT_PASSWORD", "artemis")
 
-
-@pytest.fixture
-def pg_config(postgresql):
-	return {
-		DatabaseConfKey.USER: postgresql.info.user,
-		DatabaseConfKey.HOST: postgresql.info.host,
-		DatabaseConfKey.PORT: postgresql.info.port,
-		DatabaseConfKey.DATABASE: postgresql.info.dbname,
-		DatabaseConfKey.PASSWORD: postgresql.info.password,
-	}
-
-
-@pytest.fixture
-def config_file(pg_config, topics):
-	SetupTest.ensure_test_dir()
-	SetupTest.ensure_database_dir()
-	test_config_data = SetupTest.read_test_config()
-	test_config_data["mqtt"][MqttConfKey.CLIENT_ID] = "pg-test-consumer"
-	config_file = create_config_file(test_config_data, pg_config, topics)
-	return config_file
-
-
-@pytest_asyncio.fixture
-async def publisher():
-	config_file = SetupTest.get_test_config_path()
-	config = AppConfig(config_file)
-	config._config_data["mqtt"][MqttConfKey.CLIENT_ID] = "pg-test-publisher"
-	mqtt_publisher = MqttPublisher(config)
-	return mqtt_publisher
+	try:
+		async with aiomqtt.Client(
+			hostname="localhost",
+			port=1883,
+			username=username,
+			password=password,
+		) as client:
+			yield client
+	except aiomqtt.MqttError as e:
+		pytest.skip(f"MQTT Broker not available: {str(e)}")
 
 
 @pytest.mark.asyncio
-async def test_full_integration(
-	config_file,
-	postgresql,
-	subscriptions,
-	publisher: MqttPublisher,
-):
-	await run_service(config_file, True, None, "debug", True, True)  # create schema
+async def test_mqtt_message_logging(app, mqtt_client: aiomqtt.Client):
+	# Print background tasks status
+	print("\nBackground tasks at start:")
+	for task in app.background_tasks:
+		print(f"Task {task}: {task.done()}")
 
-	unique_id = 0
-	message_queue = []
-	for _ in range(1, 9):
-		for subscription in subscriptions:
-			unique_id = unique_id + 1
-			message = SentMessage(subscription=subscription, text=f"{unique_id}-{subscription.topic}")
-			message_queue.append(message)
+	test_topic = "test/logging"
+	test_payload = {
+		"message": "test message",
+		"timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+	}
 
-	async with asyncio.TaskGroup() as tg:
-		loop_task = tg.create_task(run_service(config_file, False, None, "debug", True, True))
+	# Log before publishing
+	print(f"\nPublishing message to {test_topic}")
+	await mqtt_client.publish(test_topic, payload=json.dumps(test_payload).encode(), qos=1)
 
-		sent_messages = []
-		for message in message_queue:
-			await publisher.publish(topic=message.subscription.topic, payload=message.text)
-			if not message.subscription.skip:
-				sent_messages.append(message)
+	# Wait for message to be processed
+	await asyncio.sleep(2)
 
-		result = postgresql.execute("select text, topic from journal").fetchall()
-		assert len(result) == len(sent_messages)
+	# Query for the record
+	record = await app.db.fetch_one(
+		query="""
+			SELECT * FROM pgqueuer
+			WHERE topic = :topic
+			ORDER BY creation DESC
+			LIMIT 1
+		""",
+		values={
+			"topic": test_topic,
+		},
+	)
 
-		stored_messages = {row[0]: row for row in result}
-		for sent_message in sent_messages:
-			stored_message = stored_messages.get(sent_message.text)
-			assert stored_message
-			assert stored_message[1] == sent_message.subscription.topic
+	# Print all records for debugging
+	print("\nChecking database records:")
+	all_records = await app.db.fetch_all(
+		query="SELECT * FROM pgqueuer ORDER BY creation DESC LIMIT 5"
+	)
+	print("\nLast 5 records in database:")
+	for r in all_records:
+		print(f"Topic: {r['topic']}, Payload: {r['payload']}")
 
-		loop_task.cancel()
+	# Print background tasks status again
+	print("\nBackground tasks at end:")
+	for task in app.background_tasks:
+		print(f"Task {task}: {task.done()}")
+
+	assert record is not None, "No matching record found in database"
+	assert record["topic"] == test_topic
+	assert record["payload"] == json.dumps(test_payload)

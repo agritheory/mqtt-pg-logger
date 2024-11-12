@@ -67,7 +67,8 @@ class MQTTLogger:
 
 	async def start(self):
 		"""Start MQTT client and subscribe to topics"""
-		self.topics = self.topics if self.allow_all_topics else await self.get_topics()
+		if self.allow_all_topics:
+			self.topics = await self.get_topics()
 		try:
 			async with self.client() as client:
 				_logger.info(f"MQTT client connected to {self.broker_url}:{self.broker_port}")
@@ -128,7 +129,7 @@ class MQTTLogger:
 		RETURNING id
 		"""
 		values = {
-			"topic": message.topic,
+			"topic": str(message.topic),
 			"disabled": False,
 			"owner": self.username,
 			"modified_by": self.username,
