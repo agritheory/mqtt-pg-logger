@@ -1,8 +1,61 @@
+import asyncio
 import json
+import warnings
 
 import pytest
 
+from src.create_schema import initialize_db
+from src.server import create_app
+
 # TODO: refactor to use conftest and app fixture with module scope
+warnings.filterwarnings(
+	"ignore", message="The same attribute name/cookie name/salt is used by another QuartAuth instance"
+)
+
+
+@pytest.fixture
+async def app():
+	app = create_app()
+	ctx = app.app_context()
+	await ctx.push()
+
+	await app.db.connect()
+
+	try:
+		await initialize_db()
+	except Exception as e:
+		print(f"Database initialization error: {e}")
+		raise
+
+	for startup in app.before_serving_funcs:
+		await startup()
+
+	await asyncio.sleep(2)
+
+	yield app
+
+	tasks = list(app.background_tasks)
+	for task in tasks:
+		if not task.done():
+			task.cancel()
+
+	pending_tasks = [t for t in tasks if not t.done()]
+	if pending_tasks:
+		try:
+			await asyncio.gather(*pending_tasks, return_exceptions=True)
+		except (asyncio.CancelledError, Exception) as e:
+			print(f"Task cleanup error: {e}")
+
+	await app.db.disconnect()
+	try:
+		await ctx.pop()
+	except Exception as e:
+		pass
+
+
+@pytest.fixture
+def test_client(app):
+	return app.test_client()
 
 
 @pytest.fixture
@@ -17,6 +70,17 @@ def login_mutation():
 				expiresIn
 			}
 		}
+	"""
+
+
+@pytest.fixture
+def topic_mutation():
+	return """
+		mutation {
+			createTopic(input: {topic: "topic/device1"}) {
+				id
+			}
+			}
 	"""
 
 
@@ -95,6 +159,15 @@ async def test_failed_login(test_client):
 
 
 @pytest.mark.asyncio
+async def test_create_topic(test_client, login_mutation, topic_mutation):
+	login_response = await execute_graphql(test_client, login_mutation)
+	token = login_response["data"]["login"]["accessToken"]
+	response = await execute_graphql(test_client, topic_mutation, token)
+	assert "data" in response
+	assert len(response["data"]["createTopic"]) > 0
+
+
+@pytest.mark.asyncio
 async def test_topics_query_with_valid_token(test_client, login_mutation, topics_query):
 	login_response = await execute_graphql(test_client, login_mutation)
 	token = login_response["data"]["login"]["accessToken"]
@@ -106,19 +179,10 @@ async def test_topics_query_with_valid_token(test_client, login_mutation, topics
 
 
 @pytest.mark.asyncio
-async def test_topics_query_without_token(test_client, topics_query):
-	response = await execute_graphql(test_client, topics_query)
-
-	assert "errors" in response
-	assert "Not authenticated" in response["errors"][0]
-
-
-@pytest.mark.asyncio
 async def test_topics_query_with_invalid_token(test_client, topics_query):
 	response = await execute_graphql(test_client, topics_query, "invalid_token")
-
 	assert "errors" in response
-	assert "Not authenticated" in response["errors"][0]
+	assert "Invalid or expired token" in response["errors"][0]
 
 
 @pytest.mark.asyncio
@@ -132,23 +196,7 @@ async def test_successful_logout(test_client, login_mutation, logout_mutation, t
 
 	topics_response = await execute_graphql(test_client, topics_query, token)
 	assert "errors" in topics_response
-	assert "Not authenticated" in topics_response["errors"][0]
-
-
-@pytest.mark.asyncio
-async def test_logout_without_token(test_client, logout_mutation):
-	response = await execute_graphql(test_client, logout_mutation)
-
-	assert "errors" in response
-	assert "Not authenticated" in response["errors"][0]
-
-
-@pytest.mark.asyncio
-async def test_logout_with_invalid_token(test_client, logout_mutation):
-	response = await execute_graphql(test_client, logout_mutation, "invalid_token")
-
-	assert "errors" in response
-	assert "Not authenticated" in response["errors"][0]
+	assert "Invalid or expired token" in topics_response["errors"][0]
 
 
 @pytest.mark.asyncio

@@ -60,7 +60,6 @@ class MQTTLogger:
 		"""
 
 		rows = await self.db.fetch_all(query=query)
-		print(rows)
 		if not rows:
 			return {"#"}  # fallback if no topics are configured
 		return {row["topic"] for row in rows}

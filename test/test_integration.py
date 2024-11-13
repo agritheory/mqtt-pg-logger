@@ -24,21 +24,17 @@ async def app():
 	ctx = app.app_context()
 	await ctx.push()
 
-	# First connect to DB
 	await app.db.connect()
 
-	# Initialize the database
 	try:
 		await initialize_db()
 	except Exception as e:
 		print(f"Database initialization error: {e}")
 		raise
 
-	# Run before serving functions
 	for startup in app.before_serving_funcs:
 		await startup()
 
-	# Wait for background tasks to start
 	await asyncio.sleep(2)
 
 	yield app

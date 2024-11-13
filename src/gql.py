@@ -1,19 +1,115 @@
 import datetime
+import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any
 
 import httpx
-import jwt
+import jwt  # PyJWT
 import strawberry
 from cryptography.fernet import Fernet
 from environs import Env
+from graphql import GraphQLError
 from quart import Blueprint, Response, current_app, jsonify, request
 from strawberry.asgi import GraphQL
 from strawberry.types import Info
 
-from src.auth import generate_token, token_blacklist, token_required, verify_token
+env = Env()
 
 graphql_bp = Blueprint("graphql", __name__)
+
+token_blacklist = set()
+
+
+@dataclass
+class Context:
+	user: dict | None = None
+
+
+async def get_context() -> Context:
+	auth_header = request.headers.get("Authorization")
+	context = Context()
+
+	if auth_header:
+		try:
+			scheme, token = auth_header.split()
+			if scheme.lower() == "bearer":
+				decoded_token = verify_token(token)
+				if decoded_token:
+					context.user = decoded_token
+		except ValueError:
+			pass
+
+	return context
+
+
+def token_required(func: Callable) -> Callable:
+	@wraps(func)
+	async def wrapper(*args: Any, **kwargs: Any) -> Any:
+		try:
+			info: Info = kwargs["info"]
+			context = info.context
+
+			if not context.user:
+				raise GraphQLError("Authorization required")
+			user = await load_user_context(context.user)
+			context.user = user
+			return await func(*args, **kwargs)
+
+		except GraphQLError as e:
+			raise e
+		except Exception as e:
+			raise GraphQLError(str(e))
+
+	return wrapper
+
+
+def generate_token(username, users, expires_delta=None):
+	if expires_delta is None:
+		expires_delta = datetime.timedelta(seconds=env.int("ACCESS_TOKEN_EXPIRES"))
+
+	expires = datetime.datetime.now(datetime.UTC) + expires_delta
+	token_data = {
+		"sub": username,
+		"exp": expires,
+		"iat": datetime.datetime.now(datetime.UTC),
+		"jti": secrets.token_urlsafe(16),
+	}
+
+	return jwt.encode(token_data, env.str("JWT_SECRET_KEY"), algorithm="HS256")
+
+
+def verify_token(token):
+	try:
+		decoded = jwt.decode(
+			token,
+			env.str("JWT_SECRET_KEY"),
+			algorithms=["HS256"],
+			options={"verify_exp": True},
+		)
+		if decoded["jti"] in token_blacklist:
+			return None
+		return decoded
+	except jwt.ExpiredSignatureError:
+		return None
+	except jwt.InvalidTokenError:
+		return None
+
+
+async def load_user_context(user_context):
+	query = """
+	SELECT id, username, disabled, refresh_token, creation, modified, owner, modified_by
+	FROM "user"
+	WHERE username = :username
+	"""
+	if not user_context:
+		raise GraphQLError("No User context")
+	row = await current_app.db.fetch_one(query=query, values={"username": user_context.pop("sub")})
+	user = User(**row, **user_context) if row else None
+	if user.disabled:
+		raise GraphQLError("User is disabled")
+	return user
 
 
 @strawberry.type
@@ -25,6 +121,7 @@ class User:
 	modified: datetime.datetime
 	owner: str
 	modified_by: str
+	refresh_token: strawberry.Private[object]
 	exp: strawberry.Private[object]
 	iat: strawberry.Private[object]
 	jti: strawberry.Private[object]
@@ -99,7 +196,6 @@ class Query:
 			WHERE disabled = false
 			ORDER BY topic
 		"""
-
 		rows = await current_app.db.fetch_all(query=query)
 		return [Topic(**row) for row in rows]
 
@@ -192,10 +288,10 @@ class Mutation:
 		user = await current_app.db.fetch_one(query=query, values={"username": input.username})
 
 		if not user:
-			raise Exception("Invalid credentials")
+			raise GraphQLError("Invalid credentials")
 
 		if user["disabled"]:
-			raise Exception("Account is disabled")
+			raise GraphQLError("Account is disabled")
 
 		env = Env()
 		f = Fernet(env.str("FERNET_KEY").encode())
@@ -204,9 +300,9 @@ class Mutation:
 		try:
 			decrypted_password = f.decrypt(stored_hash).decode()
 			if decrypted_password != input.password:
-				raise Exception("Invalid credentials")
+				raise GraphQLError("Invalid credentials")
 		except Exception:
-			raise Exception("Invalid credentials")
+			raise GraphQLError("Invalid credentials")
 
 		access_token = generate_token(user["username"], {})
 		refresh_token = generate_token(
@@ -232,11 +328,11 @@ class Mutation:
 		try:
 			verify_token(input.refresh_token)
 		except jwt.exceptions.InvalidTokenError:
-			raise Exception("Invalid refresh token")
+			raise GraphQLError("Invalid refresh token")
 
 		user = await load_user_context(info.context.user)
-		if user["refresh_token"] != input.refresh_token:
-			raise Exception("Invalid refresh token")
+		if user.refresh_token != input.refresh_token:
+			raise GraphQLError("Invalid refresh token")
 
 		new_access_token = generate_token(user.username, {})
 		new_refresh_token = generate_token(
@@ -406,33 +502,3 @@ async def graphql_handler():
 		)
 
 	return jsonify({"errors": ["Invalid Content-Type"]}), 400
-
-
-async def get_context() -> Context:
-	auth_header = request.headers.get("Authorization")
-	context = Context()
-
-	if auth_header:
-		try:
-			scheme, token = auth_header.split()
-			if scheme.lower() == "bearer":
-				decoded_token = verify_token(token)
-				if decoded_token:
-					context.user = decoded_token
-		except ValueError:
-			pass
-
-	return context
-
-
-async def load_user_context(user_context):
-	query = """
-	SELECT id, username, disabled, creation, modified, owner, modified_by
-	FROM "user"
-	WHERE username = :username
-	"""
-	row = await current_app.db.fetch_one(query=query, values={"username": user_context.pop("sub")})
-	user = User(**row, **user_context) if row else None
-	if user.disabled:
-		raise Exception("User is disabled")
-	return user

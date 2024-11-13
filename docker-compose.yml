@@ -23,19 +23,19 @@ services:
     restart: unless-stopped
 
   mqtt-logger:
-    container_name: mqtt-logger  # Add this line
+    container_name: mqtt-logger
     build: .
     networks:
       app-network:
         aliases:
-          - mqtt-logger  # Add this line
+          - mqtt-logger
     ports:
       - "5000:5000"
     depends_on:
       - artemis
       - timescaledb
     environment:
-      - CREATE_SCHEMA=1 # create table schema
+      - CREATE_SCHEMA=true # create table schema
       - HOST=0.0.0.0
       - PORT=5000
       - MQTT_HOST=artemis
