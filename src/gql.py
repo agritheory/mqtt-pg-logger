@@ -1,4 +1,5 @@
 import datetime
+import logging
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ env = Env()
 graphql_bp = Blueprint("graphql", __name__)
 
 token_blacklist = set()
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -104,11 +107,34 @@ async def load_user_context(user_context):
 	WHERE username = :username
 	"""
 	if not user_context:
-		raise GraphQLError("No User context")
-	row = await current_app.db.fetch_one(query=query, values={"username": user_context.pop("sub")})
-	user = User(**row, **user_context) if row else None
+		raise GraphQLError("Authorization required")
+
+	# Convert User object to dict if needed
+	if isinstance(user_context, User):
+		user_context = {
+			"sub": user_context.username,
+			"exp": getattr(user_context, "exp", None),
+			"iat": getattr(user_context, "iat", None),
+			"jti": getattr(user_context, "jti", None),
+		}
+
+	# Handle dictionary case
+	username = user_context.get("sub")
+	if not username:
+		raise GraphQLError("Invalid token format")
+
+	row = await current_app.db.fetch_one(query=query, values={"username": username})
+	if not row:
+		raise GraphQLError("User not found")
+
+	# Convert row to dict and merge with user_context
+	row_dict = dict(row)
+	user_data = {**row_dict, **user_context}
+	user = User(**user_data)
+
 	if user.disabled:
 		raise GraphQLError("User is disabled")
+
 	return user
 
 
@@ -122,6 +148,7 @@ class User:
 	owner: str
 	modified_by: str
 	refresh_token: strawberry.Private[object]
+	sub: strawberry.Private[object]
 	exp: strawberry.Private[object]
 	iat: strawberry.Private[object]
 	jti: strawberry.Private[object]
@@ -331,16 +358,19 @@ class Mutation:
 			raise GraphQLError("Invalid refresh token")
 
 		user = await load_user_context(info.context.user)
-		if user.refresh_token != input.refresh_token:
+		stored_refresh_token = user.refresh_token.decode() if user.refresh_token else None
+
+		if not stored_refresh_token or stored_refresh_token != input.refresh_token:
 			raise GraphQLError("Invalid refresh token")
 
 		new_access_token = generate_token(user.username, {})
 		new_refresh_token = generate_token(
 			user.username, {}, expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES"))
 		)
+
 		await current_app.db.execute(
 			'UPDATE "user" SET refresh_token = :refresh_token WHERE id = :user_id',
-			values={"refresh_token": new_refresh_token, "user_id": user["id"]},
+			values={"refresh_token": bytes(new_refresh_token.encode()), "user_id": user.id},
 		)
 
 		return AuthResponse(
@@ -354,12 +384,14 @@ class Mutation:
 	@strawberry.mutation
 	@token_required
 	async def logout(self, info: Info[Context, Any]) -> bool:
-		token_blacklist.add(info.context.user["jti"])
+		user = await load_user_context(info.context.user)
+		token_blacklist.add(user.jti)
 		return True
 
 	@strawberry.mutation
 	@token_required
 	async def create_topic(self, info: Info, input: TopicInput) -> Topic:
+		_logger.debug(f"User context {info.context.user}")
 		user = await load_user_context(info.context.user)
 		query = """
 		INSERT INTO topic (topic, disabled, owner, modified_by)
