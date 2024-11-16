@@ -93,6 +93,8 @@ jobs:
           # Other settings
           CREATE_SCHEMA: "true"
           LOG_LEVEL: DEBUG
+          LOG_ALL_TOPICS: "true"
+          ALLOW_ALL_TOPICS: "true"
         run: |
           # Final check for Artemis
           if ! netcat -z localhost 1883; then

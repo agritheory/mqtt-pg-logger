@@ -36,6 +36,8 @@ services:
       - timescaledb
     environment:
       - CREATE_SCHEMA=true # create table schema
+      - LOG_ALL_TOPICS=false
+      - ALLOW_ALL_TOPICS=false
       - HOST=0.0.0.0
       - PORT=5000
       - MQTT_HOST=artemis

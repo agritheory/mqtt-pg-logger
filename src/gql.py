@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import jwt  # PyJWT
 import strawberry
+from blinker import signal
 from cryptography.fernet import Fernet
 from environs import Env
 from graphql import GraphQLError
@@ -23,6 +24,7 @@ graphql_bp = Blueprint("graphql", __name__)
 token_blacklist = set()
 
 _logger = logging.getLogger(__name__)
+topic_signal = signal("topic")
 
 
 @dataclass
@@ -399,12 +401,13 @@ class Mutation:
 		RETURNING id, topic, disabled, creation, modified, owner, modified_by
 		"""
 		values = {
-			"topic": input.topic,
-			"disabled": input.disabled,
+			"topic": str(input.topic),
+			"disabled": bool(input.disabled),
 			"owner": user.username,
 			"modified_by": user.username,
 		}
 		row = await current_app.db.fetch_one(query=query, values=values)
+		await topic_signal.send_async("add_topic", topic=str(input.topic))
 		return Topic(**row)
 
 	@strawberry.mutation
@@ -427,6 +430,7 @@ class Mutation:
 			"modified_by": user.username,
 		}
 		row = await current_app.db.fetch_one(query=query, values=values)
+		topic_signal.send("add_topic", topic=str(input.topic))
 		return Topic(**row)
 
 	@strawberry.mutation

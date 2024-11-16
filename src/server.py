@@ -28,8 +28,6 @@ def create_app() -> Quart:
 	async def init_database():
 		await app.db.connect()
 
-		await mqtt_handler()
-
 		if env.bool("CREATE_SCHEMA", True):
 			"""Initialize database before serving requests"""
 			_logger.info("Initializing database before serving...")
@@ -41,6 +39,9 @@ def create_app() -> Quart:
 			except Exception as e:
 				_logger.error(f"Database initialization failed: {e}")
 				raise
+
+		# logger needs the schema to write to
+		await mqtt_handler()
 
 	async def mqtt_handler():
 		broker_url = env.str("MQTT_BROKER_HOST", "localhost")

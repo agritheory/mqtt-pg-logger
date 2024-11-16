@@ -2,10 +2,13 @@ import logging
 
 from aiomqtt import Client as AIOMQTTClient
 from aiomqtt import ProtocolVersion, TLSParameters
+from blinker import signal
 from databases import Database
 from environs import Env
 
 _logger = logging.getLogger(__name__)
+
+topic_signal = signal("topic")
 
 
 class MQTTLogger:
@@ -27,7 +30,9 @@ class MQTTLogger:
 		self.tls_params = {}
 		self.log_all_topics = env.bool("LOG_ALL_TOPICS", False)
 		self.allow_all_topics = env.bool("ALLOW_ALL_TOPICS", False)
-		self.topics = {"#"}
+		self.topics = {"#"} if self.allow_all_topics else set()
+
+		topic_signal.connect(self.add_topic)
 
 		if not env.bool("SSL_INSECURE"):
 			# TODO not tested or implemented
@@ -36,6 +41,11 @@ class MQTTLogger:
 				certfile=env.str("SSL_CERTFILE"),
 				keyfile=env.str("SSL_KEYFILE"),
 			)
+
+	@property
+	def _topics(self):
+		print(f"topics from property: {self.topics}")
+		return self.topics
 
 	def client(self):
 		_client = AIOMQTTClient(
@@ -66,13 +76,12 @@ class MQTTLogger:
 
 	async def start(self):
 		"""Start MQTT client and subscribe to topics"""
-		if self.allow_all_topics:
-			self.topics = await self.get_topics()
+		self.topics = await self.get_topics()
 		try:
 			async with self.client() as client:
 				_logger.info(f"MQTT client connected to {self.broker_url}:{self.broker_port}")
-				_logger.info(f"Filtering on topics {self.topics}")
-				for topic in self.topics:
+				_logger.info(f"Filtering on topics {self._topics}")
+				for topic in self._topics:
 					await client.subscribe(topic=topic, qos=1)
 
 				async for message in client.messages:
@@ -84,15 +93,15 @@ class MQTTLogger:
 			raise
 
 	async def store_message(self, message) -> None:
-		if not self.log_all_topics:
-			if message.topic not in self.topics:
-				_logger.warning(f"Topic not collected: '{message.topic}'")
-				return
+		if self.log_all_topics:
+			if str(message.topic) not in self._topics:
+				_logger.info(f"Topic added: '{message.topic}'")
+				await self.save_topic(message)
 		else:
-			_logger.info(f"Topic added: '{message.topic}'")
-			await self.save_topic(message)
+			_logger.warning(f"Topic not collected: '{message.topic}'")
 		if not self.allow_all_topics:
-			if message.topic not in self.topics:
+			if str(message.topic) not in self._topics:
+				_logger.warning(f"Message not collected: '{message.topic}'")
 				return
 		query = """
 			INSERT INTO pgqueuer
@@ -125,6 +134,7 @@ class MQTTLogger:
 		query = """
 		INSERT INTO topic (topic, disabled, owner, modified_by)
 		VALUES (:topic, :disabled, :owner, :modified_by)
+		ON CONFLICT (topic) DO NOTHING
 		RETURNING id
 		"""
 		values = {
@@ -135,6 +145,13 @@ class MQTTLogger:
 		}
 		async with self.db.transaction():
 			return await self.db.execute(query=query, values=values)
+
+	async def add_topic(self, sender, **kwargs):
+		topic = kwargs.get("topic")
+		if topic:
+			self.topics.add(topic)
+			print(f"Added topic from add_topic: {topic}")
+			print(f"Current topics: {self.topics}")
 
 	async def stop(self):
 		"""Stop the MQTT logger"""
