@@ -1,3 +1,4 @@
+import logging
 import shelve
 from collections import defaultdict
 from dataclasses import dataclass
@@ -8,6 +9,8 @@ from blinker import signal
 from quart import current_app
 from RestrictedPython import compile_restricted
 from RestrictedPython.Guards import safe_builtins, safe_globals
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -37,10 +40,6 @@ class Alarm:
 		self.alarm_refresh_signal.connect(self.load_alarms)
 
 	async def load_alarms(self) -> None:
-		"""
-		Load alarms from database and cache them.
-		This should be called periodically via quart.add_background_task
-		"""
 		query = """
 			SELECT id, condition, owner, topic, alarm_name, delivery_method, disabled
 			FROM alarms
@@ -75,7 +74,7 @@ class Alarm:
 						self.topic_mapping[row["topic"]].add(alarm_id)
 
 					except Exception as e:
-						print(f"Error compiling alarm {alarm_id}: {str(e)}")
+						_logger.error(f"Error compiling alarm {alarm_id}: {str(e)}")
 						continue
 
 				# Remove stale entries
@@ -84,10 +83,9 @@ class Alarm:
 					del cache[key]
 
 		except Exception as e:
-			print(f"Error loading alarms: {str(e)}")
+			_logger.error(f"Error loading alarms: {str(e)}")
 
 	async def handle_message(self, sender, **kwargs):
-		"""Handle incoming messages by evaluating cached alarms"""
 		topic = kwargs.get("topic")
 		if not topic:
 			return
@@ -115,5 +113,5 @@ class Alarm:
 						await self.trigger_alarm(alarm, message_data)
 
 				except Exception as e:
-					print(f"Error processing alarm {alarm_id}: {str(e)}")
+					_logger.error(f"Error processing alarm {alarm_id}: {str(e)}")
 					continue

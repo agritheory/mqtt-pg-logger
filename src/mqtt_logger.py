@@ -8,8 +8,6 @@ from environs import Env
 
 _logger = logging.getLogger(__name__)
 
-topic_signal = signal("topic")
-
 
 class MQTTLogger:
 	"""Handles MQTT subscription and message logging"""
@@ -30,7 +28,7 @@ class MQTTLogger:
 		self.log_all_topics = env.bool("LOG_ALL_TOPICS", False)
 		self.allow_all_topics = env.bool("ALLOW_ALL_TOPICS", False)
 		self.topics = {"#"} if self.allow_all_topics else set()
-
+		topic_signal = signal("topic")
 		topic_signal.connect(self.add_topic)
 
 		if not env.bool("SSL_INSECURE"):
