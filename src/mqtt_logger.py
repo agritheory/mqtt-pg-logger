@@ -19,7 +19,6 @@ class MQTTLogger:
 		env.read_env()
 		self._running = False
 		self.db = db
-		self.table_name = env.str("TABLE_NAME")
 		self.broker_url = broker_url or env.str("MQTT_BROKER_HOST")
 		self.broker_port = broker_port or env.int("MQTT_BROKER_PORT")
 		self.username = env.str("MQTT_USER")
@@ -103,8 +102,8 @@ class MQTTLogger:
 				_logger.warning(f"Message not collected: '{message.topic}'")
 				return
 		query = """
-			INSERT INTO pgqueuer
-			(topic, text, qos, retain, entrypoint, priority, status)
+			INSERT INTO journal
+			(topic, text, qos, retain, entrypoint, priority)
 			VALUES (
 				:topic,
 				:text,
@@ -112,7 +111,6 @@ class MQTTLogger:
 				:retain,
 				:entrypoint,
 				:priority,
-				:status
 			)
 			RETURNING id
 		"""
@@ -124,7 +122,6 @@ class MQTTLogger:
 			"retain": message.retain,
 			"entrypoint": "mqtt",
 			"priority": 0,
-			"status": "queued",
 		}
 		async with self.db.transaction():
 			await self.db.execute(query=query, values=values)

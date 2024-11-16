@@ -9,28 +9,10 @@ _logger = logging.getLogger(__name__)
 
 
 async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
-	"""Create complete database schema including admin user"""
-
-	# Create ENUM
-	await db.execute(
-		"""
-		DO $$
-		BEGIN
-			IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'pgqueuer_status') THEN
-				CREATE TYPE pgqueuer_status AS ENUM ('queued', 'picked');
-			END IF;
-
-			IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'pgqueuer_statistics_status') THEN
-				CREATE TYPE pgqueuer_statistics_status AS ENUM ('exception', 'successful');
-			END IF;
-		END $$;
-		"""
-	)
-
 	# Create tables
 	await db.execute(
 		"""
-		CREATE TABLE IF NOT EXISTS pgqueuer (
+		CREATE TABLE IF NOT EXISTS journal (
 			id BIGSERIAL NOT NULL,
 			topic VARCHAR(256),
 			text VARCHAR(4096),
@@ -40,25 +22,11 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 			retain INTEGER,
 			entrypoint TEXT NOT NULL,
 			priority INTEGER NOT NULL,
-			status pgqueuer_status NOT NULL,
 			payload VARCHAR(4096) GENERATED ALWAYS AS (text) STORED,
 			creation TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
 			modified TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-			CONSTRAINT pgqueuer_pkey PRIMARY KEY (id, creation)
+			CONSTRAINT journal_pkey PRIMARY KEY (id, creation)
 			)
-		"""
-	)
-
-	await db.execute(
-		"""
-		CREATE TABLE IF NOT EXISTS pgqueuer_statistics (
-			id SERIAL PRIMARY KEY,
-			created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT DATE_TRUNC('sec', NOW() at time zone 'UTC'),
-			count BIGINT NOT NULL,
-			priority INTEGER NOT NULL,
-			time_in_queue INTERVAL NOT NULL,
-			status pgqueuer_statistics_status NOT NULL,
-			entrypoint TEXT NOT NULL)
 		"""
 	)
 
@@ -92,7 +60,6 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 
 	# Create indexes - split into separate statements
 	indexes = [
-		"CREATE INDEX IF NOT EXISTS pgqueuer_name_idx ON pgqueuer (topic)",
 		'CREATE INDEX IF NOT EXISTS idx_user_username ON "user"(username)',
 		"CREATE INDEX IF NOT EXISTS idx_topic_topic ON topic(topic)",
 	]
@@ -103,7 +70,7 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 	# Create function
 	await db.execute(
 		r"""
-		CREATE OR REPLACE FUNCTION pgqueuer_text_to_json()
+		CREATE OR REPLACE FUNCTION journal_text_to_json()
 		RETURNS TRIGGER
 		LANGUAGE PLPGSQL
 		AS
@@ -125,7 +92,7 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 	# Drop and create trigger separately
 	await db.execute(
 		r"""
-		CREATE OR REPLACE FUNCTION pgqueuer_text_to_json()
+		CREATE OR REPLACE FUNCTION journal_text_to_json()
 		RETURNS TRIGGER
 		LANGUAGE PLPGSQL
 		AS
@@ -157,9 +124,9 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 		IF NOT EXISTS (
 			SELECT 1
 			FROM timescaledb_information.hypertables
-			WHERE hypertable_name = 'pgqueuer'
+			WHERE hypertable_name = 'journal'
 		) THEN
-			PERFORM create_hypertable('pgqueuer', 'creation',
+			PERFORM create_hypertable('journal', 'creation',
 				chunk_time_interval => INTERVAL '1 day',
 				if_not_exists => TRUE
 			);
@@ -168,13 +135,13 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 	"""
 	)
 
-	# After creating the pgqueuer table and converting to hypertable,
+	# After creating the journal table and converting to hypertable,
 	# enable compression and set configuration
 	await db.execute(
 		"""
-		ALTER TABLE pgqueuer SET (
+		ALTER TABLE journal SET (
 			timescaledb.compress,
-			timescaledb.compress_segmentby = 'topic,entrypoint,status',
+			timescaledb.compress_segmentby = 'topic',
 			timescaledb.compress_orderby = 'creation DESC'
 		);
 		"""
@@ -185,7 +152,7 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 		"""
 		DO $$
 		BEGIN
-			PERFORM add_compression_policy('pgqueuer',
+			PERFORM add_compression_policy('journal',
 				INTERVAL '7 days',
 				if_not_exists => TRUE
 			);
@@ -198,7 +165,7 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 		"""
 		DO $$
 		BEGIN
-			PERFORM add_retention_policy('pgqueuer',
+			PERFORM add_retention_policy('journal',
 				INTERVAL '90 days',
 				if_not_exists => TRUE
 			);
@@ -267,6 +234,7 @@ async def initialize_db():
 				fernet = Fernet(fernet_key)
 				await create_admin_user(db, fernet, admin_email, admin_password)
 
+			# Create MQTT service account
 			mqtt_user = env.str("MQTT_USER")
 			if fernet_key and mqtt_user:
 				await create_admin_user(db, fernet, mqtt_user, None)

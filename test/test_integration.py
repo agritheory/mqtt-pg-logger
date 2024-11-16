@@ -98,7 +98,7 @@ async def test_mqtt_message_logging(app, mqtt_client: aiomqtt.Client):
 	# Query for the record
 	record = await app.db.fetch_one(
 		query="""
-			SELECT * FROM pgqueuer
+			SELECT * FROM journal
 			WHERE topic = :topic
 			ORDER BY creation DESC
 			LIMIT 1
@@ -110,9 +110,7 @@ async def test_mqtt_message_logging(app, mqtt_client: aiomqtt.Client):
 
 	# Print all records for debugging
 	print("\nChecking database records:")
-	all_records = await app.db.fetch_all(
-		query="SELECT * FROM pgqueuer ORDER BY creation DESC LIMIT 5"
-	)
+	all_records = await app.db.fetch_all(query="SELECT * FROM journal ORDER BY creation DESC LIMIT 5")
 	print("\nLast 5 records in database:")
 	for r in all_records:
 		print(f"Topic: {r['topic']}, Payload: {r['payload']}")
