@@ -80,7 +80,7 @@ def topic_mutation():
 			createTopic(input: {topic: "topic/device1"}) {
 				id
 			}
-			}
+		}
 	"""
 
 

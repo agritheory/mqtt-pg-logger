@@ -44,7 +44,6 @@ class MQTTLogger:
 
 	@property
 	def _topics(self):
-		print(f"topics from property: {self.topics}")
 		return self.topics
 
 	def client(self):
@@ -150,8 +149,6 @@ class MQTTLogger:
 		topic = kwargs.get("topic")
 		if topic:
 			self.topics.add(topic)
-			print(f"Added topic from add_topic: {topic}")
-			print(f"Current topics: {self.topics}")
 
 	async def stop(self):
 		"""Stop the MQTT logger"""

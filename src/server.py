@@ -2,7 +2,6 @@ import logging
 
 from environs import Env
 from quart import Quart
-from quart_auth import QuartAuth
 from quart_cors import cors
 
 from src.create_schema import TimescaleDB
@@ -18,11 +17,9 @@ env.read_env()
 
 def create_app() -> Quart:
 	app = Quart(__name__)
-	auth = QuartAuth(app)
 	app.db = TimescaleDB()
 	cors_origins = env.list("CORS_ORIGINS", default=["*"])
 	app = cors(app, allow_origin=cors_origins)
-	app.auth_manager = QuartAuth(app)
 
 	@app.before_serving
 	async def init_database():
