@@ -113,6 +113,23 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 
 	await db.execute(
 		"""
+		CREATE TABLE IF NOT EXISTS alarm (
+			id SERIAL PRIMARY KEY,
+			condition TEXT NOT NULL,
+			owner VARCHAR(255) NOT NULL,
+			creation TIMESTAMP NOT NULL DEFAULT NOW(),
+			modified TIMESTAMP NOT NULL DEFAULT NOW(),
+			modified_by VARCHAR(255) NOT NULL,
+			disabled BOOLEAN NOT NULL DEFAULT FALSE,
+			topic VARCHAR(255) NOT NULL,
+			alarm_name VARCHAR(255) NOT NULL,
+			delivery_method VARCHAR(255) NOT NULL
+		);
+		"""
+	)
+
+	await db.execute(
+		"""
 		CREATE EXTENSION IF NOT EXISTS timescaledb;
 		"""
 	)

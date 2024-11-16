@@ -24,7 +24,9 @@ graphql_bp = Blueprint("graphql", __name__)
 token_blacklist = set()
 
 _logger = logging.getLogger(__name__)
+
 topic_signal = signal("topic")
+alarm_signal = signal("refresh_alarms")
 
 
 @dataclass
@@ -215,6 +217,32 @@ class Health:
 
 
 @strawberry.type
+class Alarm:
+	id: int
+	condition: str
+	owner: str
+	creation: datetime.datetime
+	modified: datetime.datetime
+	modified_by: str
+	disabled: bool
+	topic: str
+	alarm_name: str
+	delivery_method: str
+
+
+@strawberry.input
+class AlarmInput:
+	condition: str
+	owner: str
+	modified_by: str
+	topic: str
+	alarm_name: str
+	delivery_method: str
+	disabled: bool = False
+	id: int | None = None
+
+
+@strawberry.type
 class Query:
 	@strawberry.field
 	@token_required
@@ -302,6 +330,61 @@ class Query:
 			health_status.artemis_status = str(e)
 
 		return health_status
+
+	@strawberry.field
+	@token_required
+	async def alarm(self, info: Info, id: int) -> Alarm | None:
+		"""Get a single alarm by ID"""
+		query = """
+			SELECT id, condition, owner, creation, modified, modified_by,
+				disabled, topic, alarm_name, delivery_method
+			FROM alarm
+			WHERE id = :alarm_id
+		"""
+		row = await current_app.db.fetch_one(query=query, values={"alarm_id": id})
+		return Alarm(**dict(row)) if row else None
+
+	@strawberry.field
+	@token_required
+	async def get_alarms(
+		self,
+		info: Info,
+		owner: str | None = None,
+		topic: str | None = None,
+		disabled: bool | None = None,
+		limit: int = 100,
+		offset: int = 0,
+	) -> list[Alarm]:
+
+		conditions = []
+		values = {"limit": limit, "offset": offset}
+
+		if owner is not None:
+			conditions.append("owner = :owner")
+			values["owner"] = owner
+
+		if topic is not None:
+			conditions.append("topic = :topic")
+			values["topic"] = topic
+
+		if disabled is not None:
+			conditions.append("disabled = :disabled")
+			values["disabled"] = disabled
+
+		where_clause = " AND ".join(conditions)
+		where_clause = f"WHERE {where_clause}" if where_clause else ""
+
+		query = f"""
+			SELECT id, condition, owner, creation, modified, modified_by,
+				disabled, topic, alarm_name, delivery_method
+			FROM alarm
+			{where_clause}
+			ORDER BY modified DESC
+			LIMIT :limit OFFSET :offset
+		"""
+
+		rows = await current_app.db.fetch_all(query=query, values=values)
+		return [Alarm(**dict(row)) for row in rows]
 
 
 @strawberry.type
@@ -393,7 +476,6 @@ class Mutation:
 	@strawberry.mutation
 	@token_required
 	async def create_topic(self, info: Info, input: TopicInput) -> Topic:
-		_logger.debug(f"User context {info.context.user}")
 		user = await load_user_context(info.context.user)
 		query = """
 		INSERT INTO topic (topic, disabled, owner, modified_by)
@@ -430,7 +512,7 @@ class Mutation:
 			"modified_by": user.username,
 		}
 		row = await current_app.db.fetch_one(query=query, values=values)
-		topic_signal.send("add_topic", topic=str(input.topic))
+		await topic_signal.send("add_topic", topic=str(input.topic))
 		return Topic(**row)
 
 	@strawberry.mutation
@@ -479,6 +561,64 @@ class Mutation:
 		}
 		row = await current_app.db.fetch_one(query=query, values=values)
 		return User(**row)
+
+	@strawberry.mutation
+	@token_required
+	async def alarm(self, info: Info, input: AlarmInput) -> Alarm:
+		user = await load_user_context(info.context.user)
+
+		if input.id is None:
+			query = """
+				INSERT INTO alarm (
+					condition, owner, modified_by, topic,
+					alarm_name, delivery_method, disabled
+				)
+				VALUES (
+					:condition, :owner, :modified_by, :topic,
+					:alarm_name, :delivery_method, :disabled
+				)
+				RETURNING id, condition, owner, creation, modified, modified_by,
+					disabled, topic, alarm_name, delivery_method
+			"""
+			values = {
+				"condition": input.condition,
+				"owner": input.owner,
+				"modified_by": user.username,
+				"topic": input.topic,
+				"alarm_name": input.alarm_name,
+				"delivery_method": input.delivery_method,
+				"disabled": input.disabled,
+			}
+		else:
+			# Update existing alarm
+			query = """
+				UPDATE alarm
+				SET condition = :condition,
+					owner = :owner,
+					modified_by = :modified_by,
+					topic = :topic,
+					alarm_name = :alarm_name,
+					delivery_method = :delivery_method,
+					disabled = :disabled,
+					modified = CURRENT_TIMESTAMP
+				WHERE id = :id
+				RETURNING id, condition, owner, creation, modified, modified_by,
+									disabled, topic, alarm_name, delivery_method
+			"""
+			values = {
+				"id": input.id,
+				"condition": input.condition,
+				"owner": input.owner,
+				"modified_by": user.username,
+				"topic": input.topic,
+				"alarm_name": input.alarm_name,
+				"delivery_method": input.delivery_method,
+				"disabled": input.disabled,
+			}
+
+		row = await current_app.db.fetch_one(query=query, values=values)
+		await alarm_signal.send("refresh_alarm")
+		return Alarm(**dict(row)) if row else None
 
 
 schema = strawberry.Schema(query=Query, mutation=Mutation)

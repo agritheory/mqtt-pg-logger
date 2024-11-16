@@ -1113,6 +1113,21 @@ files = [
 quart = ">=0.15"
 
 [[package]]
+name = "restrictedpython"
+version = "7.4"
+description = "RestrictedPython is a defined subset of the Python language which allows to provide a program input into a trusted environment."
+optional = false
+python-versions = "<3.14,>=3.8"
+files = [
+    {file = "RestrictedPython-7.4-py3-none-any.whl", hash = "sha256:f431c76f848f6f6d50ae21457cb503642db60889a273e4be439cf7ca4cbaf999"},
+    {file = "restrictedpython-7.4.tar.gz", hash = "sha256:81b62924713dbd280917fceaecaf210fef7a49dddf1a08c8c214a3613fbeb425"},
+]
+
+[package.extras]
+docs = ["Sphinx", "furo"]
+test = ["pytest", "pytest-mock"]
+
+[[package]]
 name = "rich"
 version = "13.9.4"
 description = "Render rich text, tables, progress bars, syntax highlighting, markdown and more to the terminal"
@@ -1395,5 +1410,5 @@ h11 = ">=0.9.0,<1"
 
 [metadata]
 lock-version = "2.0"
-python-versions = "^3.12"
-content-hash = "5cf792b80ee0aed078ef7beba094a3bf6ef4a82a09bb4b452e0adffdb557c709"
+python-versions = ">=3.12,<3.14"
+content-hash = "0a431f52e18c92e6a770d64565e7dcc375913e53810d399750057314f181b8b8"

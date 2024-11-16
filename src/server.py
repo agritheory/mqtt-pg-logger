@@ -4,6 +4,7 @@ from environs import Env
 from quart import Quart
 from quart_cors import cors
 
+from src.alarm import Alarm
 from src.create_schema import TimescaleDB
 from src.gql import graphql_bp
 from src.mqtt_logger import MQTTLogger
@@ -37,8 +38,11 @@ def create_app() -> Quart:
 				_logger.error(f"Database initialization failed: {e}")
 				raise
 
-		# logger needs the schema to write to
+		# logger and alarms needs the schema to read and write and should be initialized afterwards
 		await mqtt_handler()
+
+		alarms = Alarm()
+		await alarms.load_alarms()
 
 	async def mqtt_handler():
 		broker_url = env.str("MQTT_BROKER_HOST", "localhost")
