@@ -61,6 +61,10 @@ repos:
         files: ^(src/|tests/|).*\.(py|pyx|pxd)$
         args:
           - --warn-return-any
+          - --disallow-untyped-defs
+          - --disallow-incomplete-defs
+          - --check-untyped-defs
+          - --disallow-untyped-decorators
           - --show-error-codes
           - --pretty
 
