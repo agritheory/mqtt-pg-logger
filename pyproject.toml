@@ -22,6 +22,7 @@ restrictedpython = "^7.4"
 
 [tool.poetry.scripts]
 start = "src.server:main"
+publish-loadcell = "test.load_cell_example_data:main"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "^7.1.1"

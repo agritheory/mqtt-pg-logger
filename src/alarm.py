@@ -42,7 +42,7 @@ class Alarm:
 	async def load_alarms(self) -> None:
 		query = """
 			SELECT id, condition, owner, topic, alarm_name, delivery_method, disabled
-			FROM alarms
+			FROM alarm
 			WHERE disabled = FALSE
 		"""
 
