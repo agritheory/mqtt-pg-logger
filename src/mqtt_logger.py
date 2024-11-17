@@ -108,7 +108,7 @@ class MQTTLogger:
 				:qos,
 				:retain,
 				:entrypoint,
-				:priority,
+				:priority
 			)
 			RETURNING id
 		"""
@@ -148,10 +148,9 @@ class MQTTLogger:
 	async def stop(self):
 		"""Stop the MQTT logger"""
 		self._running = False
-		if hasattr(self, "client") and self.client:
-			try:
-				if hasattr(self.client, "disconnect"):
-					await self.client.disconnect()
-			except Exception as e:
-				_logger.error(f"Error disconnecting MQTT client: {e}")
+		try:
+			if hasattr(self.client, "disconnect"):
+				await self.client.disconnect()
+		except Exception as e:
+			_logger.error(f"Error disconnecting MQTT client: {e}")
 		_logger.info("MQTT logger stopped")

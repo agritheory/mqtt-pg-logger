@@ -4,7 +4,7 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import jwt  # PyJWT
@@ -158,12 +158,8 @@ class User:
 	jti: strawberry.Private[object]
 
 
-@dataclass
-class Context:
-	user: dict | User | None = None
-
-
-@strawberry.type
+@strawberry.type(init=True)
+@dataclass  # typing helper
 class AuthResponse:
 	message: str
 	access_token: str
@@ -207,13 +203,14 @@ class UserInput:
 	disabled: bool = False
 
 
-@strawberry.type
+@strawberry.type(init=True)
+@dataclass  # typing helper
 class Health:
-	status: str
+	status: Literal["ok", "error"]
 	timestamp: datetime.datetime
-	mqtt_connection: str
-	artemis_status: str
 	timescaledb_status: str
+	artemis_status: str
+	mqtt_connection: str
 
 
 @strawberry.type
@@ -352,13 +349,10 @@ class Query:
 		owner: str | None = None,
 		topic: str | None = None,
 		disabled: bool | None = None,
-		limit: int = 100,
-		offset: int = 0,
 	) -> list[Alarm]:
 
 		conditions = []
-		values = {"limit": limit, "offset": offset}
-
+		values = {}
 		if owner is not None:
 			conditions.append("owner = :owner")
 			values["owner"] = owner
@@ -369,7 +363,7 @@ class Query:
 
 		if disabled is not None:
 			conditions.append("disabled = :disabled")
-			values["disabled"] = disabled
+			values["disabled"] = str(disabled)
 
 		where_clause = " AND ".join(conditions)
 		where_clause = f"WHERE {where_clause}" if where_clause else ""
@@ -380,7 +374,6 @@ class Query:
 			FROM alarm
 			{where_clause}
 			ORDER BY modified DESC
-			LIMIT :limit OFFSET :offset
 		"""
 
 		rows = await current_app.db.fetch_all(query=query, values=values)
@@ -618,7 +611,7 @@ class Mutation:
 
 		row = await current_app.db.fetch_one(query=query, values=values)
 		await alarm_signal.send("refresh_alarm")
-		return Alarm(**dict(row)) if row else None
+		return Alarm(**dict(row))
 
 
 schema = strawberry.Schema(query=Query, mutation=Mutation)

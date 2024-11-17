@@ -1,5 +1,7 @@
+# src/server.py
 import logging
 
+import uvicorn
 from environs import Env
 from quart import Quart
 from quart_cors import cors
@@ -48,7 +50,6 @@ def create_app() -> Quart:
 		broker_url = env.str("MQTT_BROKER_HOST", "localhost")
 		broker_port = env.int("MQTT_BROKER_PORT", 1883)
 		mqtt_logger = MQTTLogger(app.db, broker_url, broker_port)
-
 		app.add_background_task(mqtt_logger.start)
 
 	app.register_blueprint(graphql_bp, url_prefix="/graphql")
@@ -56,8 +57,24 @@ def create_app() -> Quart:
 	return app
 
 
+# Create the application instance at module level
+application = create_app()
+
+
 def main():
 	"""Entry point for the server"""
 	_logger.info("Starting MQTT-Quart-Logger server...")
-	app = create_app()
-	app.run(host=env.str("HOST"), port=env.int("PORT"), debug=True)
+	host = env.str("HOST", "0.0.0.0")
+	port = env.int("PORT", 8000)
+	uvicorn.run(
+		"src.server:application",
+		host=host,
+		port=port,
+		reload=env.bool("DEBUG", True),
+		log_level="debug" if env.bool("DEBUG", True) else "info",
+		workers=env.int("UVICORN_WORKERS", 1),
+	)
+
+
+if __name__ == "__main__":
+	main()

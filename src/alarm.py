@@ -115,3 +115,6 @@ class Alarm:
 				except Exception as e:
 					_logger.error(f"Error processing alarm {alarm_id}: {str(e)}")
 					continue
+
+	def trigger_alarm(self, alarm, message_data):
+		_logger.error("Alarm Notifications are not yet implemented")

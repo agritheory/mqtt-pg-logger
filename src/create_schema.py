@@ -192,7 +192,7 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 
 
 async def create_admin_user(
-	db: Database, fernet: Fernet, admin_email: str, admin_password: str
+	db: Database, fernet: Fernet, admin_email: str, admin_password: str | None = None
 ) -> None:
 	"""Create admin user if it doesn't exist"""
 	query = 'SELECT id FROM "user" WHERE username = :username'
