@@ -1,25 +1,46 @@
 services:
   artemis:
     image: apache/activemq-artemis:latest-alpine
+    networks:
+      - app-network
     ports:
-      - 8161:8161 # Web Console
+      - ${ARTEMIS_WEB_CONSOLE_PORT:-8161}:8161 # Web Console
       - 61616:61616 # Main Messaging Port
       - 1883:1883 # MQTT Port
       - 8883:8883 # MQTT Port with TLS
+    # volumes: # Uncomment when using TLS
+    # - ./certs:/etc/ssl/certs
+    # - ./broker.xml:/var/lib/artemis-instance/etc-override/broker.xml
+    # environment:
+    # - EXTRA_ARGS=--http-host 0.0.0.0 --relax-jolokia --ssl-key /etc/ssl/certs/le_keystore.jks --ssl-key-password securepass
+    environment:
+     - EXTRA_ARGS=--http-host 0.0.0.0 --relax-jolokia
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${ARTEMIS_WEB_CONSOLE_PORT:-8161}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
 
-  mqtt-pg-logger:
+  mqtt-logger:
+    container_name: mqtt-logger
     build: .
-    develop:
-      watch:
-        - action: rebuild
-          path: .
+    networks:
+      app-network:
+        aliases:
+          - mqtt-logger
+    ports:
+      - "5000:5000"
     depends_on:
       - artemis
       - timescaledb
     environment:
+      - CREATE_SCHEMA=true # create table schema
+      - LOG_ALL_TOPICS=true
+      - ALLOW_ALL_TOPICS=true
+      - HOST=0.0.0.0
+      - PORT=5000
       - MQTT_HOST=artemis
-      - MQTT_PORT=1883
       - MQTT_USER=artemis
       - MQTT_PASSWORD=artemis
       - DATABASE_HOST=timescaledb
@@ -27,15 +48,34 @@ services:
       - DATABASE_PASSWORD=postgres
       - DATABASE_NAME=postgres
       - DATABASE_PORT=5432
-      - SSL_INSECURE=True
+      - SSL_INSECURE=True # Set to False when using TLS
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
 
   timescaledb:
     image: timescale/timescaledb:latest-pg16
+    networks:
+      - app-network
     ports:
       - 5432:5432
     environment:
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_USER=postgres
       - POSTGRES_DB=postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  artemis-config:

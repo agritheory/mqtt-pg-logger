@@ -52,6 +52,27 @@ repos:
     hooks:
       - id: black
 
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.9.0
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - cython-lint
+        files: ^(src/|tests/|).*\.(py|pyx|pxd)$
+        args:
+          - --warn-return-any
+          - --disallow-untyped-defs
+          - --disallow-incomplete-defs
+          - --check-untyped-defs
+          - --disallow-untyped-decorators
+          - --show-error-codes
+          - --pretty
+
+  - repo: https://github.com/MarcoGorelli/cython-lint
+    rev: v0.16.0
+    hooks:
+      - id: cython-lint
+
 
 ci:
   autoupdate_schedule: weekly

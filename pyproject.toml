@@ -1,43 +1,72 @@
 [tool.poetry]
-name = "mqtt-pg-logger"
+name = "mqtt-logger"
 version = "0.1.0"
-description = "MQTT PostgreSQL Logger"
+description = "MQTT Logger"
 authors = ["Tyler Matteson <tyler@agritheory.com>"]
 license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.12"
-asyncpg = "^0.30.0"
-attrs = "^24.2.0"
-click = "^8.1.7"
-jsonschema = "^4.23.0"
-paho-mqtt = "^2.1.0"
-pyyaml = "^6.0.2"
-tzlocal = "^5.2"
+python = ">=3.12,<3.14"
 aiomqtt = {git = "https://github.com/empicano/aiomqtt.git"}
+cryptography = "^43.0.3"
+databases = {extras = ["asyncpg"], version = "^0.9.0"}
+pyjwt = "^2.9.0"
+environs = "^11.0.0"
 quart = "^0.19.8"
-quart-auth = "^0.10.1"
+quart-cors = "^0.7.0"
+strawberry-graphql = {extras = ["debug-server"], version = "^0.247.1"}
+uvicorn = "^0.32.0"
+httpx = "^0.27.2"
+restrictedpython = "^7.4"
+
+[tool.poetry.scripts]
+start = "src.server:main"
+publish-loadcell = "test.load_cell_example_data:main"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "^7.1.1"
 pytest = "^8.3.3"
 pytest-asyncio = "^0.24.0"
-pytest-postgresql = "^6.1.1"
-psycopg = {extras = ["binary"], version = "^3.2.3"}
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core", "Cython"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.build]
+generate-setup-file = false
+# script = "build.py"
 
 [tool.black]
 line-length = 99
 
 [tool.isort]
-line_length = 99
-multi_line_output = 3
-include_trailing_comma = true
-force_grid_wrap = 0
-use_parentheses = true
-ensure_newline_before_comments = true
+profile = "black"
 indent = "\t"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
+log_cli = true
+# log_cli_level = "INFO"
+log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
+log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+allow_untyped_defs = true
+allow_incomplete_defs = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+
+
+[[tool.mypy.overrides]]
+module = ["*.pyx", "*.pxd"]
+ignore_errors = true

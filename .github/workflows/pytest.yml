@@ -1,67 +1,106 @@
-name: CI
+name: Pytest
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
-    branches:
-      - main
-
-permissions:
-  contents: read
+    branches: [ main ]
 
 jobs:
-  compose:
-    name: Compose
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Run docker-compose
-        uses: hoverkraft-tech/compose-action@v2.0.1
-
   test:
-    name: Pytest
-    needs: compose
     runs-on: ubuntu-latest
+    
+    services:
+      artemis:
+        image: apache/activemq-artemis:latest-alpine
+        ports:
+          - 8161:8161
+          - 61616:61616
+          - 1883:1883
+          - 8883:8883
+        env:
+          ARTEMIS_USER: artemis
+          ARTEMIS_PASSWORD: artemis
+          EXTRA_ARGS: --http-host 0.0.0.0 --relax-jolokia
+        options: >-
+          --health-cmd "curl -f http://localhost:8161"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      timescaledb:
+        image: timescale/timescaledb:latest-pg16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
+      
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y netcat-openbsd curl
+      
       - name: Set up Python
-        id: setup-python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: "3.12"
-          cache: "pip"
-
+          
       - name: Install Poetry
         uses: snok/install-poetry@v1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          virtualenvs-path: .venv
-          installer-parallel: true
-
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v3
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
-
+        
       - name: Install dependencies
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: poetry install --no-interaction --no-root
+        run: poetry install
 
-      - name: Install project
-        run: poetry install --no-interaction
-
-      - name: Test with pytest
+      - name: Check Artemis status
         run: |
-          source .venv/bin/activate
-          pytest .
+          echo "Checking Docker containers..."
+          docker ps
+          
+          echo "\nChecking Artemis logs..."
+          ARTEMIS_CONTAINER=$(docker ps | grep 'activemq-artemis' | awk '{print $1}')
+          docker logs $ARTEMIS_CONTAINER
+          
+          echo "\nChecking MQTT port..."
+          for i in {1..30}; do
+            if netcat -z localhost 1883; then
+              echo "Artemis MQTT port is ready!"
+              break
+            fi
+            echo "Waiting for Artemis... ($i/30)"
+            sleep 1
+          done
+
+      - name: Run tests
+        env:
+          # Database settings
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: postgres
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          # MQTT settings
+          MQTT_BROKER_HOST: localhost
+          MQTT_BROKER_PORT: 1883
+          MQTT_USER: artemis
+          MQTT_PASSWORD: artemis
+          MQTT_CLIENT_ID: mqtt-logger-test
+          # Other settings
+          CREATE_SCHEMA: "true"
+          LOG_LEVEL: DEBUG
+          LOG_ALL_TOPICS: "true"
+          ALLOW_ALL_TOPICS: "true"
+        run: |
+          # Final check for Artemis
+          if ! netcat -z localhost 1883; then
+            echo "ERROR: Artemis is not ready on port 1883"
+            docker ps
+            docker logs $(docker ps | grep 'activemq-artemis' | awk '{print $1}')
+            exit 1
+          fi
+          
+          poetry run pytest

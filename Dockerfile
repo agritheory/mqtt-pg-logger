@@ -1,21 +1,36 @@
 FROM python:3.12-slim
 
-RUN apt update && apt install -y git
+# System dependencies, including curl
+RUN apt-get update && apt-get install -y \
+    net-tools \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir /mqtt-pg-logger
-COPY . /mqtt-pg-logger/
-COPY sql/table.sql /docker-entrypoint-initdb.d/00_table.sql
-COPY sql/convert.sql /docker-entrypoint-initdb.d/01_convert.sql
-COPY sql/trigger.sql /docker-entrypoint-initdb.d/02_trigger.sql
+# Set working directory
+WORKDIR /app
 
-WORKDIR /mqtt-pg-logger
-RUN pip install poetry
-RUN poetry config virtualenvs.create false
-RUN poetry install --only main --no-interaction --no-ansi
+# Install Poetry using official installer
+RUN curl -sSL https://install.python-poetry.org | python3 -
 
-COPY entrypoint.sh /
-RUN chmod +x /entrypoint.sh
+# Add Poetry to PATH
+ENV PATH="/root/.local/bin:$PATH"
 
-EXPOSE 5432
+# Copy dependency files
+COPY pyproject.toml poetry.lock ./
 
-ENTRYPOINT ["/entrypoint.sh"]
+# Install dependencies
+RUN poetry config virtualenvs.create false && \
+    poetry install --only main --no-interaction --no-ansi
+
+# Copy application code
+COPY . .
+
+# Set Python to run in unbuffered mode
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONTRACEMALLOC=1
+
+EXPOSE 5000
+
+# Run the service
+CMD ["poetry", "run", "start"]

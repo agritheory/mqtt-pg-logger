@@ -50,3 +50,7 @@ mqtt-pg-logger.yaml
 mqtt-pg-logger.service
 broker.xml
 certs
+.env
+
+# Hasn't been propritary before, it will be going forward.
+docker-compose.prod.yml
