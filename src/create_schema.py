@@ -217,7 +217,7 @@ async def create_admin_user(
 		_logger.info(f"{admin_email} user created successfully")
 
 
-def TimescaleDB(**kwargs) -> Database:
+def TimescaleDB(**kwargs: str) -> Database:
 	env = Env()
 	env.read_env()
 
@@ -231,7 +231,7 @@ def TimescaleDB(**kwargs) -> Database:
 	return Database(db_url)
 
 
-async def initialize_db():
+async def initialize_db() -> None:
 	"""Initialize database with schema and admin user"""
 	env = Env()
 	env.read_env()

@@ -1,5 +1,7 @@
 import logging
+from typing import Any
 
+import aiomqtt
 from aiomqtt import Client as AIOMQTTClient
 from aiomqtt import ProtocolVersion, TLSParameters
 from blinker import signal
@@ -10,8 +12,6 @@ _logger = logging.getLogger(__name__)
 
 
 class MQTTLogger:
-	"""Handles MQTT subscription and message logging"""
-
 	def __init__(self, db: Database, broker_url: str = "localhost", broker_port: int = 1883):
 		env = Env()
 		env.read_env()
@@ -40,10 +40,10 @@ class MQTTLogger:
 			)
 
 	@property
-	def _topics(self):
+	def _topics(self) -> set:
 		return self.topics
 
-	def client(self):
+	def client(self) -> AIOMQTTClient:
 		_client = AIOMQTTClient(
 			hostname=self.broker_url,
 			port=self.broker_port,
@@ -57,7 +57,7 @@ class MQTTLogger:
 			_client.tls_params = self.tls_params
 		return _client
 
-	async def get_topics(self):
+	async def get_topics(self) -> set:
 		query = """
 			SELECT id, topic, disabled, creation, modified, owner, modified_by
 			FROM topic
@@ -70,7 +70,7 @@ class MQTTLogger:
 			return {"#"}  # fallback if no topics are configured
 		return {row["topic"] for row in rows}
 
-	async def start(self):
+	async def start(self) -> None:
 		"""Start MQTT client and subscribe to topics"""
 		self.topics = await self.get_topics()
 		try:
@@ -88,7 +88,7 @@ class MQTTLogger:
 			_logger.error(f"Failed to start MQTT client: {e}")
 			raise
 
-	async def store_message(self, message) -> None:
+	async def store_message(self, message: aiomqtt.Message) -> None:
 		if self.log_all_topics:
 			if str(message.topic) not in self._topics:
 				_logger.info(f"Topic added: '{message.topic}'")
@@ -124,7 +124,7 @@ class MQTTLogger:
 		async with self.db.transaction():
 			await self.db.execute(query=query, values=values)
 
-	async def save_topic(self, message):
+	async def save_topic(self, message: aiomqtt.Message) -> None:
 		query = """
 		INSERT INTO topic (topic, disabled, owner, modified_by)
 		VALUES (:topic, :disabled, :owner, :modified_by)
@@ -138,14 +138,14 @@ class MQTTLogger:
 			"modified_by": self.username,
 		}
 		async with self.db.transaction():
-			return await self.db.execute(query=query, values=values)
+			await self.db.execute(query=query, values=values)
 
-	async def add_topic(self, sender, **kwargs):
+	async def add_topic(self, sender: Any, **kwargs: str) -> None:
 		topic = kwargs.get("topic")
 		if topic:
 			self.topics.add(topic)
 
-	async def stop(self):
+	async def stop(self) -> None:
 		"""Stop the MQTT logger"""
 		self._running = False
 		try:

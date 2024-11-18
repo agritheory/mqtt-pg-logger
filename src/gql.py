@@ -4,7 +4,7 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, Literal
+from typing import Any
 
 import httpx
 import jwt  # PyJWT
@@ -72,7 +72,7 @@ def token_required(func: Callable) -> Callable:
 	return wrapper
 
 
-def generate_token(username, users, expires_delta=None):
+def generate_token(username: str, expires_delta: datetime.timedelta | None = None) -> str:
 	if expires_delta is None:
 		expires_delta = datetime.timedelta(seconds=env.int("ACCESS_TOKEN_EXPIRES"))
 
@@ -87,7 +87,7 @@ def generate_token(username, users, expires_delta=None):
 	return jwt.encode(token_data, env.str("JWT_SECRET_KEY"), algorithm="HS256")
 
 
-def verify_token(token):
+def verify_token(token: str) -> None:
 	try:
 		decoded = jwt.decode(
 			token,
@@ -104,7 +104,7 @@ def verify_token(token):
 		return None
 
 
-async def load_user_context(user_context):
+async def load_user_context(user_context: dict) -> "User":
 	query = """
 	SELECT id, username, disabled, refresh_token, creation, modified, owner, modified_by
 	FROM "user"
@@ -142,7 +142,7 @@ async def load_user_context(user_context):
 	return user
 
 
-@strawberry.type
+@strawberry.type()
 class User:
 	id: int
 	username: str
@@ -158,8 +158,7 @@ class User:
 	jti: strawberry.Private[object]
 
 
-@strawberry.type(init=True)
-@dataclass  # typing helper
+@strawberry.type()
 class AuthResponse:
 	message: str
 	access_token: str
@@ -203,10 +202,9 @@ class UserInput:
 	disabled: bool = False
 
 
-@strawberry.type(init=True)
-@dataclass  # typing helper
+@strawberry.type()
 class Health:
-	status: Literal["ok", "error"]
+	status: str
 	timestamp: datetime.datetime
 	timescaledb_status: str
 	artemis_status: str
@@ -274,7 +272,7 @@ class Query:
 		ORDER BY username
 		"""
 		rows = await current_app.db.fetch_all(query=query)
-		return [User(**row) for row in rows]
+		return [User(**row, refresh_token="", sub="", exp="", iat="", jti="") for row in rows]
 
 	@strawberry.field
 	@token_required
@@ -409,9 +407,9 @@ class Mutation:
 		except Exception:
 			raise GraphQLError("Invalid credentials")
 
-		access_token = generate_token(user["username"], {})
+		access_token = generate_token(user["username"])
 		refresh_token = generate_token(
-			user["username"], {}, expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES"))
+			user["username"], expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES"))
 		)
 
 		await current_app.db.execute(
@@ -619,7 +617,7 @@ graphql_app = GraphQL(schema)
 
 
 @graphql_bp.route("/", methods=["GET", "POST"])
-async def graphql_handler():
+async def graphql_handler() -> Response:
 	if request.method == "GET":
 		return Response(
 			"""

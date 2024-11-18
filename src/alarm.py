@@ -85,7 +85,7 @@ class Alarm:
 		except Exception as e:
 			_logger.error(f"Error loading alarms: {str(e)}")
 
-	async def handle_message(self, sender, **kwargs):
+	async def handle_message(self, sender: str, **kwargs: str) -> None:
 		topic = kwargs.get("topic")
 		if not topic:
 			return
@@ -110,11 +110,11 @@ class Alarm:
 					result = eval(alarm.byte_code, self.safe_globals, locals_dict)
 
 					if result:
-						await self.trigger_alarm(alarm, message_data)
+						self.trigger_alarm(alarm, message_data)
 
 				except Exception as e:
 					_logger.error(f"Error processing alarm {alarm_id}: {str(e)}")
 					continue
 
-	def trigger_alarm(self, alarm, message_data):
+	def trigger_alarm(self, alarm: str, message_data: str) -> None:
 		_logger.error("Alarm Notifications are not yet implemented")

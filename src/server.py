@@ -25,7 +25,7 @@ def create_app() -> Quart:
 	app = cors(app, allow_origin=cors_origins)
 
 	@app.before_serving
-	async def init_database():
+	async def init_database() -> None:
 		await app.db.connect()
 
 		if env.bool("CREATE_SCHEMA", True):
@@ -46,7 +46,7 @@ def create_app() -> Quart:
 		alarms = Alarm()
 		await alarms.load_alarms()
 
-	async def mqtt_handler():
+	async def mqtt_handler() -> None:
 		broker_url = env.str("MQTT_BROKER_HOST", "localhost")
 		broker_port = env.int("MQTT_BROKER_PORT", 1883)
 		mqtt_logger = MQTTLogger(app.db, broker_url, broker_port)
@@ -61,11 +61,11 @@ def create_app() -> Quart:
 application = create_app()
 
 
-def main():
+def main() -> None:
 	"""Entry point for the server"""
 	_logger.info("Starting MQTT-Quart-Logger server...")
 	host = env.str("HOST", "0.0.0.0")
-	port = env.int("PORT", 8000)
+	port = env.int("PORT", 5000)
 	uvicorn.run(
 		"src.server:application",
 		host=host,
