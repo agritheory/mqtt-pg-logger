@@ -1,4 +1,3 @@
-# src/server.py
 import logging
 
 import uvicorn

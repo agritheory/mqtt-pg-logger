@@ -10,6 +10,8 @@ from quart import current_app
 from RestrictedPython import compile_restricted
 from RestrictedPython.Guards import safe_builtins, safe_globals
 
+from src.pid import PIDControllerStore
+
 _logger = logging.getLogger(__name__)
 
 
@@ -26,11 +28,23 @@ class CompiledAlarm:
 
 
 class Alarm:
-	def __init__(self, cache_path: str = "alarms.shelve"):
+	def __init__(self, cache_path: str = "alarms.shelve", pid_store_path: str = "pid.shelve"):
 		self.cache_path = Path(cache_path)
 		self.topic_mapping: dict[str, set[int]] = defaultdict(set)
+		self.pid_store = PIDControllerStore(pid_store_path)
+
+		# Set up safe globals for RestrictedPython
 		self.safe_globals = dict(safe_globals)
 		self.safe_globals.update(safe_builtins)
+
+		# Add PID functions to safe_globals
+		self.safe_globals.update(
+			{
+				"pid_compute": self.pid_compute,
+				"pid_reset": self.pid_reset,
+				"pid_last_output": self.pid_last_output,
+			}
+		)
 
 		# Register blinker signal handler
 		self.alarm_signal = signal("alarm")
@@ -38,6 +52,42 @@ class Alarm:
 
 		self.alarm_refresh_signal = signal("refresh_alarms")
 		self.alarm_refresh_signal.connect(self.load_alarms)
+
+	# PID wrapper functions to expose to user alarm code
+	def pid_compute(
+		self,
+		pid_id: str,
+		setpoint: float,
+		process_value: float,
+		kp: float = 1.0,
+		ki: float = 0.0,
+		kd: float = 0.0,
+		min_output: float = float("-inf"),
+		max_output: float = float("inf"),
+	) -> float:
+		"""Safe wrapper for PID computation."""
+		try:
+			return self.pid_store.compute(
+				pid_id, setpoint, process_value, kp, ki, kd, min_output, max_output
+			)
+		except Exception as e:
+			_logger.error(f"Error in PID compute for {pid_id}: {str(e)}")
+			return 0.0
+
+	def pid_reset(self, pid_id: str) -> None:
+		"""Safe wrapper for PID reset."""
+		try:
+			self.pid_store.reset(pid_id)
+		except Exception as e:
+			_logger.error(f"Error in PID reset for {pid_id}: {str(e)}")
+
+	def pid_last_output(self, pid_id: str) -> float:
+		"""Safe wrapper to get the last PID output."""
+		try:
+			return self.pid_store.get_last_output(pid_id)
+		except Exception as e:
+			_logger.error(f"Error getting last PID output for {pid_id}: {str(e)}")
+			return 0.0
 
 	async def load_alarms(self) -> None:
 		query = """
@@ -90,7 +140,7 @@ class Alarm:
 		if not topic:
 			return
 
-		message_data = kwargs.get("message", {})
+		message_data: str | dict[str, Any] = kwargs.get("message", {})
 		matching_alarm_ids = self.topic_mapping.get(topic, set())
 
 		if not matching_alarm_ids:
@@ -116,5 +166,7 @@ class Alarm:
 					_logger.error(f"Error processing alarm {alarm_id}: {str(e)}")
 					continue
 
-	def trigger_alarm(self, alarm: str, message_data: str) -> None:
+	def trigger_alarm(self, alarm: CompiledAlarm, message_data: str | dict[str, Any]) -> None:
+		# Replace this with your notification implementation
+		_logger.error(f"ALARM TRIGGERED: {alarm.alarm_name} on topic {alarm.topic}")
 		_logger.error("Alarm Notifications are not yet implemented")

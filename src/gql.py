@@ -77,19 +77,20 @@ def generate_token(username: str, expires_delta: datetime.timedelta | None = Non
 		expires_delta = datetime.timedelta(seconds=env.int("ACCESS_TOKEN_EXPIRES"))
 
 	expires = datetime.datetime.now(datetime.UTC) + expires_delta
-	token_data = {
+	token_data: dict = {
 		"sub": username,
 		"exp": expires,
 		"iat": datetime.datetime.now(datetime.UTC),
 		"jti": secrets.token_urlsafe(16),
 	}
 
-	return jwt.encode(token_data, env.str("JWT_SECRET_KEY"), algorithm="HS256")
+	token: str = jwt.encode(token_data, env.str("JWT_SECRET_KEY"), algorithm="HS256")
+	return token
 
 
-def verify_token(token: str) -> None:
+def verify_token(token: str) -> dict | None:
 	try:
-		decoded = jwt.decode(
+		decoded: dict = jwt.decode(
 			token,
 			env.str("JWT_SECRET_KEY"),
 			algorithms=["HS256"],
@@ -142,7 +143,7 @@ async def load_user_context(user_context: dict) -> "User":
 	return user
 
 
-@strawberry.type()
+@strawberry.type
 class User:
 	id: int
 	username: str
@@ -158,7 +159,7 @@ class User:
 	jti: strawberry.Private[object]
 
 
-@strawberry.type()
+@strawberry.type
 class AuthResponse:
 	message: str
 	access_token: str
@@ -202,7 +203,7 @@ class UserInput:
 	disabled: bool = False
 
 
-@strawberry.type()
+@strawberry.type
 class Health:
 	status: str
 	timestamp: datetime.datetime

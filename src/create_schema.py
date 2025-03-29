@@ -14,15 +14,15 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 		"""
 		CREATE TABLE IF NOT EXISTS journal (
 			id BIGSERIAL NOT NULL,
-			topic VARCHAR(256),
-			text VARCHAR(4096),
+			topic TEXT,
+			text TEXT,
 			data JSONB,
 			message_id INTEGER,
 			qos INTEGER,
 			retain INTEGER,
 			entrypoint TEXT NOT NULL,
 			priority INTEGER NOT NULL,
-			payload VARCHAR(4096) GENERATED ALWAYS AS (text) STORED,
+			payload TEXT GENERATED ALWAYS AS (text) STORED,
 			creation TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
 			modified TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
 			CONSTRAINT journal_pkey PRIMARY KEY (id, creation)
