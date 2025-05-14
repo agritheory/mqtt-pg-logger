@@ -158,6 +158,7 @@ class Alarm:
 
 					# Evaluate the pre-compiled condition
 					result = eval(alarm.byte_code, self.safe_globals, locals_dict)
+					# filter/forward code here
 
 					if result:
 						self.trigger_alarm(alarm, message_data)
