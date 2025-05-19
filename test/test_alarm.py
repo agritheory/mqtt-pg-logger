@@ -1,13 +1,8 @@
-# use graphql API to upload alarm script
-# alarm and payload
-# alarm includes topic/device
-# try to parse payload as json or jsonpath
-# then try to get path to desired location
-# measurement.weight.value in example data
-#
-
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import pytest
+from quart.testing import QuartClient
 
 # --------------------------------------------------------------------------------
 # GraphQL documents
@@ -45,7 +40,7 @@ query {
 
 
 @pytest.fixture
-def new_alarm_input():
+def new_alarm_input() -> dict[str, Any]:
 	return {
 		"condition": "message['temperature'] > 75",
 		"owner": "admin@agritheory.dev",
@@ -63,17 +58,21 @@ def new_alarm_input():
 
 
 @pytest.mark.asyncio
-async def test_create_alarm(test_client, login_mutation, execute_graphql, new_alarm_input):
+async def test_create_alarm(
+	test_client: QuartClient,
+	login_mutation: str,
+	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
+	new_alarm_input: dict[str, Any],
+) -> None:
 	# Authenticate
-	login_resp = await execute_graphql(test_client, login_mutation)
+	login_resp = await execute_graphql(login_mutation)
 	token = login_resp["data"]["login"]["accessToken"]
 
 	# Create a new alarm
 	resp = await execute_graphql(
-		test_client,
 		ALARM_MUTATION,
-		token,
-		{"input": new_alarm_input},
+		token=token,
+		variables={"input": new_alarm_input},
 	)
 	assert "data" in resp and "alarm" in resp["data"]
 	alarm = resp["data"]["alarm"]
@@ -86,13 +85,20 @@ async def test_create_alarm(test_client, login_mutation, execute_graphql, new_al
 
 
 @pytest.mark.asyncio
-async def test_get_alarms(test_client, login_mutation, execute_graphql):
+async def test_get_alarms(
+	test_client: QuartClient,
+	login_mutation: str,
+	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
+) -> None:
 	# Authenticate
-	login_resp = await execute_graphql(test_client, login_mutation)
+	login_resp = await execute_graphql(login_mutation)
 	token = login_resp["data"]["login"]["accessToken"]
 
 	# Retrieve the list of alarms
-	resp = await execute_graphql(test_client, GET_ALARMS_QUERY, token)
+	resp = await execute_graphql(
+		GET_ALARMS_QUERY,
+		token=token,
+	)
 	assert "data" in resp and "getAlarms" in resp["data"]
 	alarms = resp["data"]["getAlarms"]
 
@@ -101,17 +107,21 @@ async def test_get_alarms(test_client, login_mutation, execute_graphql):
 
 
 @pytest.mark.asyncio
-async def test_update_alarm(test_client, login_mutation, execute_graphql, new_alarm_input):
+async def test_update_alarm(
+	test_client: QuartClient,
+	login_mutation: str,
+	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
+	new_alarm_input: dict[str, Any],
+) -> None:
 	# Authenticate
-	login_resp = await execute_graphql(test_client, login_mutation)
+	login_resp = await execute_graphql(login_mutation)
 	token = login_resp["data"]["login"]["accessToken"]
 
 	# Create a fresh alarm to update
 	create_resp = await execute_graphql(
-		test_client,
 		ALARM_MUTATION,
-		token,
-		{"input": new_alarm_input},
+		token=token,
+		variables={"input": new_alarm_input},
 	)
 	alarm = create_resp["data"]["alarm"]
 	alarm_id = alarm["id"]
@@ -124,10 +134,9 @@ async def test_update_alarm(test_client, login_mutation, execute_graphql, new_al
 
 	# Perform the update
 	update_resp = await execute_graphql(
-		test_client,
 		ALARM_MUTATION,
-		token,
-		{"input": updated_input},
+		token=token,
+		variables={"input": updated_input},
 	)
 	updated_alarm = update_resp["data"]["alarm"]
 
@@ -137,13 +146,16 @@ async def test_update_alarm(test_client, login_mutation, execute_graphql, new_al
 
 
 @pytest.mark.asyncio
-async def test_alarm_unauthorized(test_client, execute_graphql, new_alarm_input):
+async def test_alarm_unauthorized(
+	test_client: QuartClient,
+	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
+	new_alarm_input: dict[str, Any],
+) -> None:
 	# Attempt to create without a token
 	resp = await execute_graphql(
-		test_client,
 		ALARM_MUTATION,
-		None,
-		{"input": new_alarm_input},
+		token=None,
+		variables={"input": new_alarm_input},
 	)
 	assert "errors" in resp
 	assert "Authorization required" in resp["errors"][0]
