@@ -440,9 +440,9 @@ class Mutation:
 		if not stored_refresh_token or stored_refresh_token != input.refresh_token:
 			raise GraphQLError("Invalid refresh token")
 
-		new_access_token = generate_token(user.username, {})
+		new_access_token = generate_token(user.username)
 		new_refresh_token = generate_token(
-			user.username, {}, expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES"))
+			user.username, expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES"))
 		)
 
 		await current_app.db.execute(
@@ -609,7 +609,7 @@ class Mutation:
 			}
 
 		row = await current_app.db.fetch_one(query=query, values=values)
-		await alarm_signal.send("refresh_alarm")
+		await alarm_signal.send_async("refresh_alarms")
 		return Alarm(**dict(row))
 
 

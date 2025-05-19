@@ -139,3 +139,23 @@ class PIDControllerStore:
 			namespace_data = db[namespace]
 			namespace_data[controller_id] = state
 			db[namespace] = namespace_data
+
+	def get_all_pid_ids(self) -> list[str]:
+		"""
+		Return a list of all pid_id strings currently stored on disk.
+		pid_id is either 'namespace/controller_id' or simply 'controller_id'
+		if it lives in the default namespace.
+		"""
+		ids: list[str] = []
+
+		# Open the shelf and iterate all namespaces
+		with shelve.open(self.shelf_path) as db:
+			for namespace, controllers in db.items():
+				# controllers is itself a dict mapping controller_id -> PIDState
+				for controller_id in controllers.keys():
+					if namespace == "default":
+						ids.append(controller_id)
+					else:
+						ids.append(f"{namespace}/{controller_id}")
+
+		return ids
