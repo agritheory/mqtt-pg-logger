@@ -1,0 +1,27 @@
+{
+  "name": "Existing Docker Compose (Extend)",
+
+  "dockerComposeFile": [
+    "../docker-compose.yml",
+    "docker-compose.yml"
+  ],
+  "service": "mqtt-logger",
+  "workspaceFolder": "/app",
+
+  // —————————————————————————————————————————————
+  // SSH-agent forwarding:
+  // mounts your host's SSH_AUTH_SOCK into the container
+  "runArgs": [
+    "-v", "${env:SSH_AUTH_SOCK}:/ssh-agent",
+    "-e", "SSH_AUTH_SOCK=/ssh-agent"
+  ],
+
+  // —————————————————————————————————————————————
+  // Commands to run after the container is built/created
+  "postCreateCommand": "poetry install --with test && pip install pre-commit && pre-commit install",
+
+  // —————————————————————————————————————————————
+  // If you want VS Code to use a non-root user (e.g. "vscode"):
+  // make sure that user exists in your Dockerfile or compose setup
+  "remoteUser": "vscode"
+}
