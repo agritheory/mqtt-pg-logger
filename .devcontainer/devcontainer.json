@@ -6,19 +6,17 @@
   ],
   "service": "mqtt-logger",
   "workspaceFolder": "/app",
+
   "mounts": [
-    // forward your SSH agent socket
-    "source=${env:SSH_AUTH_SOCK},target=/ssh-agent,type=bind,consistency=cached",
-    // mount your host Git config
-    "source=${localEnv:HOME}/.gitconfig,target=/home/vscode/.gitconfig,type=bind,consistency=cached"
+    // bind your host's SSH socket into /ssh-agent in the container
+    "source=${env:SSH_AUTH_SOCK},target=/ssh-agent,type=bind,consistency=cached"
   ],
+
   "containerEnv": {
-    "SSH_AUTH_SOCK": "/ssh-agent",
-    "GIT_AUTHOR_NAME": "${localEnv:GIT_AUTHOR_NAME}",
-    "GIT_AUTHOR_EMAIL": "${localEnv:GIT_AUTHOR_EMAIL}",
-    "GIT_COMMITTER_NAME": "${localEnv:GIT_AUTHOR_NAME}",
-    "GIT_COMMITTER_EMAIL": "${localEnv:GIT_AUTHOR_EMAIL}"
+    // point SSH tooling at the forwarded socket
+    "SSH_AUTH_SOCK": "/ssh-agent"
   },
-  "postCreateCommand": "poetry install --with dev && pre-commit install && git config --global user.name \"${localEnv:GIT_AUTHOR_NAME:-Your Name}\" && git config --global user.email \"${localEnv:GIT_AUTHOR_EMAIL:-you@example.com}\"",
+
+  "postCreateCommand": "poetry install --with dev && pre-commit install",
   "remoteUser": "root"
 }
