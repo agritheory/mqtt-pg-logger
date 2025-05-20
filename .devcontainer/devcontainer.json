@@ -18,10 +18,10 @@
 
   // —————————————————————————————————————————————
   // Commands to run after the container is built/created
-  "postCreateCommand": "poetry install --with test && pip install pre-commit && pre-commit install",
+  "postCreateCommand": "poetry install --extras \"test\" && pip install pre-commit && pre-commit install",
 
   // —————————————————————————————————————————————
   // If you want VS Code to use a non-root user (e.g. "vscode"):
   // make sure that user exists in your Dockerfile or compose setup
-  "remoteUser": "vscode"
+  "remoteUser": "root"
 }
