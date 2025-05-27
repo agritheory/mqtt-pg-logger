@@ -171,3 +171,6 @@ class Alarm:
 		# Replace this with your notification implementation
 		_logger.error(f"ALARM TRIGGERED: {alarm.alarm_name} on topic {alarm.topic}")
 		_logger.error("Alarm Notifications are not yet implemented")
+
+	def get_all_pid_ids(self) -> list[str]:
+		return self.pid_store.get_all_pid_ids()

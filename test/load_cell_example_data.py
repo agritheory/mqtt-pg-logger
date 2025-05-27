@@ -10,6 +10,8 @@ import httpx
 from aiomqtt import Client, MqttError
 from environs import Env
 
+from pid import PIDControllerStore
+
 # Configure logging and environment
 logging.basicConfig(
 	level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -149,6 +151,12 @@ class LoadCellPublisher:
 						logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
 
 						await client.publish(topic=topic, payload=json.dumps(payload), qos=self.qos)
+
+						PIDControllerStore().compute(
+							pid_id=topic,
+							setpoint=self.capacity_lb,
+							process_value=payload["measurement"]["weight"]["value"],
+						)
 
 						logger.info(f"Published reading: {payload['measurement']['weight']['value']} lb")
 						await asyncio.sleep(interval)
