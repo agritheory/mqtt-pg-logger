@@ -18,25 +18,25 @@ logger = logging.getLogger(__name__)
 env = Env()
 
 
-async def setup_topic():
+async def setup_topic() -> bool:
 	"""Setup authentication and create topic if it doesn't exist"""
 	login_mutation = """
-		mutation Login($input: LoginInput!) {
-			login(input: $input) {
-				access_token
-				message
-			}
-		}
-	"""
+       mutation Login($input: LoginInput!) {
+           login(input: $input) {
+               accessToken
+               message
+           }
+       }
+   """
 
 	create_topic_mutation = """
-		mutation CreateTopic($input: TopicInput!) {
-			createTopic(input: $input) {
-				id
-				topic
-			}
-		}
-	"""
+        mutation CreateTopic($input: TopicInput!) {
+            createTopic(input: $input) {
+                id
+                topic
+            }
+        }
+    """
 
 	async with httpx.AsyncClient(verify=False) as client:
 		# Login to get access token
@@ -55,7 +55,7 @@ async def setup_topic():
 				logger.error(f"Login failed: {login_data['errors']}")
 				return False
 
-			access_token = login_data["data"]["login"]["access_token"]
+			access_token = login_data["data"]["login"]["accessToken"]
 
 			# Create topic using the access token
 			headers = {"Authorization": f"Bearer {access_token}"}
@@ -102,12 +102,12 @@ def resolve_host(hostname: str) -> str:
 class LoadCellPublisher:
 	def __init__(
 		self,
-		broker: str = None,
-		port: int = None,
-		capacity_lb: int = None,
-		username: str = None,
-		password: str = None,
-		qos: int = None,
+		broker: str | None = None,
+		port: int | None = None,
+		capacity_lb: int | None = None,
+		username: str | None = None,
+		password: str | None = None,
+		qos: int | None = None,
 	):
 		self.broker = resolve_host(env.str("MQTT_BROKER_HOST", "artemis"))
 		self.port = port or env.int("MQTT_BROKER_PORT", 1883)
@@ -121,7 +121,6 @@ class LoadCellPublisher:
 		self.last_calibration = datetime(2024, 10, 1, 8, 0, 0)
 
 		# RL20000SS specific configurations
-		self.capacity_lb = capacity_lb
 		self.rated_output = 3.0  # mV/V
 		self.output_tolerance = 0.008  # mV/V
 		self.excitation_voltage = 10.0  # VDC (within 5-10V range)
@@ -129,7 +128,7 @@ class LoadCellPublisher:
 
 		logger.info(f"Initialized publisher for device {self.device_id}")
 
-	async def publish_data(self, interval=1.0):
+	async def publish_data(self, interval: float = 1.0) -> None:
 		"""Publish load cell data at specified interval."""
 		logger.info(f"Attempting to connect to MQTT broker at {self.broker}:{self.port}")
 		try:
@@ -172,7 +171,7 @@ class LoadCellPublisher:
 		except Exception as e:
 			logger.error(f"Unexpected error: {e}", exc_info=True)
 
-	def generate_payload(self):
+	def generate_payload(self) -> dict:
 		"""Generate a realistic Rice Lake RL20000SS load cell reading with metadata."""
 		self.sequence += 1
 
@@ -256,7 +255,7 @@ class LoadCellPublisher:
 			},
 		}
 
-	def check_temperature_limits(self, temp_c):
+	def check_temperature_limits(self, temp_c: float) -> str:
 		"""Check if temperature is within specified ranges."""
 		if -10 <= temp_c <= 40:
 			return "compensated"
@@ -266,7 +265,7 @@ class LoadCellPublisher:
 			return "out_of_range"
 
 
-async def amain():
+async def amain() -> None:
 	logger.info("Starting publisher")
 
 	# Setup topic before starting publisher
@@ -285,7 +284,7 @@ async def amain():
 		raise
 
 
-def main():
+def main() -> None:
 	"""Entry point for the poetry script."""
 	try:
 		logger.info("Starting Load Cell Publisher")
