@@ -1,8 +1,7 @@
 import logging
-import shelve
 from collections import defaultdict
 from dataclasses import dataclass
-from pathlib import Path
+from types import CodeType
 from typing import Any
 
 from blinker import signal
@@ -24,12 +23,12 @@ class CompiledAlarm:
 	delivery_method: str
 	owner: str
 	disabled: bool
-	byte_code: Any  # Compiled Python code object
+	byte_code: CodeType  # Compiled Python code object
 
 
 class Alarm:
-	def __init__(self, cache_path: str = "alarms.shelve", pid_store_path: str = "pid.shelve"):
-		self.cache_path = Path(cache_path)
+	def __init__(self, cache: dict | None = None, pid_store_path: str = "pid.shelve"):
+		self.cache = {} if cache is None else cache
 		self.topic_mapping: dict[str, set[int]] = defaultdict(set)
 		self.pid_store = PIDControllerStore(pid_store_path)
 
@@ -96,44 +95,34 @@ class Alarm:
 			WHERE disabled = FALSE
 		"""
 
-		try:
-			rows = await current_app.db.fetch_all(query=query)
-			self.topic_mapping.clear()
-			with shelve.open(str(self.cache_path)) as cache:
-				current_ids = set()
+		rows = await current_app.db.fetch_all(query=query)
+		self.topic_mapping.clear()
+		current_ids = set()
 
-				for row in rows:
-					alarm_id = row["id"]
-					current_ids.add(alarm_id)
+		for row in rows:
+			alarm_id = int(row["id"])
+			current_ids.add(alarm_id)
 
-					try:
-						byte_code = compile_restricted(row["condition"], "<string>", "eval")
+			byte_code = compile_restricted(row["condition"], "<string>", "eval")
 
-						cached_alarm = CompiledAlarm(
-							id=alarm_id,
-							condition=row["condition"],
-							topic=row["topic"],
-							alarm_name=row["alarm_name"],
-							delivery_method=row["delivery_method"],
-							owner=row["owner"],
-							disabled=row["disabled"],
-							byte_code=byte_code,
-						)
+			cached_alarm = CompiledAlarm(
+				id=alarm_id,
+				condition=row["condition"],
+				topic=row["topic"],
+				alarm_name=row["alarm_name"],
+				delivery_method=row["delivery_method"],
+				owner=row["owner"],
+				disabled=row["disabled"],
+				byte_code=byte_code,
+			)
 
-						cache[str(alarm_id)] = cached_alarm
-						self.topic_mapping[row["topic"]].add(alarm_id)
+			self.cache[alarm_id] = cached_alarm
+			self.topic_mapping[row["topic"]].add(alarm_id)
 
-					except Exception as e:
-						_logger.error(f"Error compiling alarm {alarm_id}: {str(e)}")
-						continue
-
-				# Remove stale entries
-				stale_keys = set(cache.keys()) - {str(id) for id in current_ids}
-				for key in stale_keys:
-					del cache[key]
-
-		except Exception as e:
-			_logger.error(f"Error loading alarms: {str(e)}")
+		# Remove stale entries
+		stale_keys = set(self.cache.keys()) - {str(id) for id in current_ids}
+		for key in stale_keys:
+			del self.cache[key]
 
 	async def handle_message(self, sender: str, **kwargs: str) -> None:
 		topic = kwargs.get("topic")
@@ -146,26 +135,25 @@ class Alarm:
 		if not matching_alarm_ids:
 			return
 
-		with shelve.open(str(self.cache_path)) as cache:
-			for alarm_id in matching_alarm_ids:
-				try:
-					alarm = cache.get(str(alarm_id))
-					if not alarm:
-						continue
-
-					# Create restricted environment with message data
-					locals_dict = {"message": message_data}
-
-					# Evaluate the pre-compiled condition
-					result = eval(alarm.byte_code, self.safe_globals, locals_dict)
-					# filter/forward code here
-
-					if result:
-						self.trigger_alarm(alarm, message_data)
-
-				except Exception as e:
-					_logger.error(f"Error processing alarm {alarm_id}: {str(e)}")
+		for alarm_id in matching_alarm_ids:
+			try:
+				alarm = self.cache.get(str(alarm_id))
+				if not alarm:
 					continue
+
+				# Create restricted environment with message data
+				locals_dict = {"message": message_data}
+
+				# Evaluate the pre-compiled condition
+				result = eval(alarm.byte_code, self.safe_globals, locals_dict)
+				# filter/forward code here
+
+				if result:
+					self.trigger_alarm(alarm, message_data)
+
+			except Exception as e:
+				_logger.error(f"Error processing alarm {alarm_id}: {str(e)}")
+				continue
 
 	def trigger_alarm(self, alarm: CompiledAlarm, message_data: str | dict[str, Any]) -> None:
 		# Replace this with your notification implementation
