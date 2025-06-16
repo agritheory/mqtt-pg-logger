@@ -1,6 +1,7 @@
 import logging
 
 import uvicorn
+from blinker import signal
 from environs import Env
 from quart import Quart
 from quart_cors import cors
@@ -20,6 +21,7 @@ env.read_env()
 def create_app() -> Quart:
 	app = Quart(__name__)
 	app.db = TimescaleDB()
+	app.cache = {}
 	cors_origins = env.list("CORS_ORIGINS", default=["*"])
 	app = cors(app, allow_origin=cors_origins)
 
@@ -43,7 +45,8 @@ def create_app() -> Quart:
 		await mqtt_handler()
 
 		alarms = Alarm()
-		await alarms.load_alarms()
+		alarm_signal = signal("refresh_alarms")
+		await alarm_signal.send_async("refresh_alarms")
 
 	async def mqtt_handler() -> None:
 		broker_url = env.str("MQTT_BROKER_HOST", "localhost")

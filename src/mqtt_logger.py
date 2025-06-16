@@ -8,6 +8,8 @@ from blinker import signal
 from databases import Database
 from environs import Env
 
+from alarm import Alarm
+
 _logger = logging.getLogger(__name__)
 
 
@@ -38,6 +40,8 @@ class MQTTLogger:
 				certfile=env.str("SSL_CERTFILE"),
 				keyfile=env.str("SSL_KEYFILE"),
 			)
+
+		self.alarm = Alarm()
 
 	@property
 	def _topics(self) -> set:
@@ -81,12 +85,23 @@ class MQTTLogger:
 					await client.subscribe(topic=topic, qos=1)
 
 				async for message in client.messages:
-					_logger.info(f"Payload: {message.payload}")
-					await self.store_message(message)
+					# _logger.info(f"Payload: {message.payload}")
+					await self.handle_message(message)
 
 		except Exception as e:
 			_logger.error(f"Failed to start MQTT client: {e}")
 			raise
+
+	async def handle_message(self, message: aiomqtt.Message) -> None:
+		try:
+			await self.store_message(message)
+		except Exception as e:
+			_logger.error(f"Failed to store message: {e}")
+
+		try:
+			await self.alarm.handle_message(message)
+		except Exception as e:
+			_logger.error(f"Failed to handle alarm: {e}")
 
 	async def store_message(self, message: aiomqtt.Message) -> None:
 		if self.log_all_topics:

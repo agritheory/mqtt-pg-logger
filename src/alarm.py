@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from types import CodeType
 from typing import Any
 
+import aiomqtt
 from blinker import signal
 from quart import current_app
 from RestrictedPython import compile_restricted
@@ -28,7 +29,7 @@ class CompiledAlarm:
 
 class Alarm:
 	def __init__(self, cache: dict | None = None, pid_store_path: str = "pid.shelve"):
-		self.cache = {} if cache is None else cache
+		self.cache = current_app.cache if cache is None else cache
 		self.topic_mapping: dict[str, set[int]] = defaultdict(set)
 		self.pid_store = PIDControllerStore(pid_store_path)
 
@@ -44,11 +45,6 @@ class Alarm:
 				"pid_last_output": self.pid_last_output,
 			}
 		)
-
-		# Register blinker signal handler
-		self.alarm_signal = signal("alarm")
-		self.alarm_signal.connect(self.handle_message)
-
 		self.alarm_refresh_signal = signal("refresh_alarms")
 		self.alarm_refresh_signal.connect(self.load_alarms)
 
@@ -88,7 +84,7 @@ class Alarm:
 			_logger.error(f"Error getting last PID output for {pid_id}: {str(e)}")
 			return 0.0
 
-	async def load_alarms(self) -> None:
+	async def load_alarms(self, *sender: Any, **kwargs: str) -> None:
 		query = """
 			SELECT id, condition, owner, topic, alarm_name, delivery_method, disabled
 			FROM alarm
@@ -124,14 +120,16 @@ class Alarm:
 		for key in stale_keys:
 			del self.cache[key]
 
-	async def handle_message(self, sender: str, **kwargs: str) -> None:
-		topic = kwargs.get("topic")
-		if not topic:
-			return
+	async def handle_message(self, message: aiomqtt.Message) -> None:
+		_logger.info(f"Handling message: {message.topic}")
 
-		message_data: str | dict[str, Any] = kwargs.get("message", {})
-		matching_alarm_ids = self.topic_mapping.get(topic, set())
+		message_data: str | dict[str, Any] = message.payload.decode()
+		matching_alarm_ids = self.topic_mapping.get(message.topic, set())
+		_logger.info(f"possible alarm ids: {self.topic_mapping}")
+		_logger.info(f"Matching alarm ids: {matching_alarm_ids}")
+		_logger.info(f"Message data: {message_data}")
 
+		# TODO: not finding any matching alarm ids
 		if not matching_alarm_ids:
 			return
 
