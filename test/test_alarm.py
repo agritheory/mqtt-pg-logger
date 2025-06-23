@@ -1,7 +1,9 @@
 from collections.abc import Awaitable, Callable
+from test.load_cell_example_data import amain as load_cell_data_async
 from typing import Any
 
 import pytest
+from blinker import signal
 from quart.testing import QuartClient
 
 # --------------------------------------------------------------------------------
@@ -39,7 +41,7 @@ query {
 # --------------------------------------------------------------------------------
 
 
-@pytest.fixture
+@pytest.fixture  # type: ignore[misc]
 def new_alarm_input() -> dict[str, Any]:
 	return {
 		"condition": "message['temperature'] > 75",
@@ -52,12 +54,25 @@ def new_alarm_input() -> dict[str, Any]:
 	}
 
 
+@pytest.fixture  # type: ignore[misc]
+def new_alarm_load_cell() -> dict[str, Any]:
+	return {
+		"condition": "message['measurement']['weight']['value'] > 0",
+		"owner": "admin@agritheory.dev",
+		"modifiedBy": "admin@agritheory.dev",
+		"disabled": False,
+		"topic": "sensors/loadcell/RL20000SS-500LB/data",
+		"alarmName": "Sensor Activated",
+		"deliveryMethod": "email",
+	}
+
+
 # --------------------------------------------------------------------------------
 # Tests
 # --------------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_create_alarm(
 	test_client: QuartClient,
 	login_mutation: str,
@@ -84,7 +99,7 @@ async def test_create_alarm(
 	assert alarm["disabled"] is False
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_get_alarms(
 	test_client: QuartClient,
 	login_mutation: str,
@@ -106,7 +121,7 @@ async def test_get_alarms(
 	assert len(alarms) > 0
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_update_alarm(
 	test_client: QuartClient,
 	login_mutation: str,
@@ -145,7 +160,7 @@ async def test_update_alarm(
 	assert updated_alarm["disabled"] is True
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_alarm_unauthorized(
 	test_client: QuartClient,
 	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
@@ -159,3 +174,36 @@ async def test_alarm_unauthorized(
 	)
 	assert "errors" in resp
 	assert "Authorization required" in resp["errors"][0]
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_alarm_trigger(
+	test_client: QuartClient,
+	login_mutation: str,
+	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
+	new_alarm_load_cell: dict[str, Any],
+) -> None:
+	login_resp = await execute_graphql(login_mutation)
+	token = login_resp["data"]["login"]["accessToken"]
+
+	resp = await execute_graphql(
+		ALARM_MUTATION,
+		token=token,
+		variables={"input": new_alarm_load_cell},
+	)
+	received = {}
+
+	def receiver(sender: Any, **kwargs: Any) -> None:
+		received["alarm"] = kwargs.get("alarm")
+		received["data"] = kwargs.get("message_data")
+
+	triggered = signal("alarm_triggered")
+	triggered.connect(receiver)
+
+	await load_cell_data_async(continuous=False)
+
+	alarm = received.get("alarm")
+	assert alarm is not None, "No alarm was received"
+	assert alarm.alarm_name == new_alarm_load_cell["alarmName"]
+
+	triggered.disconnect(receiver)

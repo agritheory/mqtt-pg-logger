@@ -130,7 +130,7 @@ class LoadCellPublisher:
 
 		logger.info(f"Initialized publisher for device {self.device_id}")
 
-	async def publish_data(self, interval: float = 1.0) -> None:
+	async def publish_data(self, interval: float = 1.0, continuous: bool = True) -> None:
 		"""Publish load cell data at specified interval."""
 		logger.info(f"Attempting to connect to MQTT broker at {self.broker}:{self.port}")
 		try:
@@ -159,6 +159,10 @@ class LoadCellPublisher:
 						)
 
 						logger.info(f"Published reading: {payload['measurement']['weight']['value']} lb")
+
+						if continuous is False:
+							break
+
 						await asyncio.sleep(interval)
 
 					except Exception as e:
@@ -273,7 +277,7 @@ class LoadCellPublisher:
 			return "out_of_range"
 
 
-async def amain() -> None:
+async def amain(continuous: bool = True) -> None:
 	logger.info("Starting publisher")
 
 	# Setup topic before starting publisher
@@ -284,7 +288,7 @@ async def amain() -> None:
 
 	publisher = LoadCellPublisher()
 	try:
-		await publisher.publish_data(interval=2.0)
+		await publisher.publish_data(interval=2.0, continuous=continuous)
 	except KeyboardInterrupt:
 		logger.info("Shutting down publisher")
 	except Exception as e:
@@ -292,11 +296,11 @@ async def amain() -> None:
 		raise
 
 
-def main() -> None:
+def main(continuous: bool = True) -> None:
 	"""Entry point for the poetry script."""
 	try:
 		logger.info("Starting Load Cell Publisher")
-		asyncio.run(amain())
+		asyncio.run(amain(continuous))
 	except KeyboardInterrupt:
 		logger.info("Publisher stopped by user")
 	except Exception as e:

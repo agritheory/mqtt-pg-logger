@@ -50,6 +50,8 @@ class Alarm:
 		self.alarm_refresh_signal = signal("refresh_alarms")
 		self.alarm_refresh_signal.connect(self.load_alarms)
 
+		self.alarm_triggered = signal("alarm_triggered")
+
 	# PID wrapper functions to expose to user alarm code
 	def pid_compute(
 		self,
@@ -163,6 +165,7 @@ class Alarm:
 	def trigger_alarm(self, alarm: CompiledAlarm, message_data: str | dict[str, Any]) -> None:
 		# Replace this with your notification implementation
 		_logger.error(f"ALARM TRIGGERED: {alarm.alarm_name} on topic {alarm.topic}")
+		self.alarm_triggered.send(sender=self, alarm=alarm, message_data=message_data)
 		_logger.error("Alarm Notifications are not yet implemented")
 
 	def get_all_pid_ids(self) -> list[str]:
