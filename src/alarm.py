@@ -1,3 +1,4 @@
+import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -43,6 +44,7 @@ class Alarm:
 				"pid_compute": self.pid_compute,
 				"pid_reset": self.pid_reset,
 				"pid_last_output": self.pid_last_output,
+				"_getitem_": lambda obj, key: obj[key],
 			}
 		)
 		self.alarm_refresh_signal = signal("refresh_alarms")
@@ -84,7 +86,7 @@ class Alarm:
 			_logger.error(f"Error getting last PID output for {pid_id}: {str(e)}")
 			return 0.0
 
-	async def load_alarms(self, *sender: Any, **kwargs: str) -> None:
+	async def load_alarms(self, sender: Any, **kwargs: str) -> None:
 		query = """
 			SELECT id, condition, owner, topic, alarm_name, delivery_method, disabled
 			FROM alarm
@@ -115,31 +117,37 @@ class Alarm:
 			self.cache[alarm_id] = cached_alarm
 			self.topic_mapping[row["topic"]].add(alarm_id)
 
-		# Remove stale entries
-		stale_keys = set(self.cache.keys()) - {str(id) for id in current_ids}
-		for key in stale_keys:
-			del self.cache[key]
+		# # Remove stale entries
+		# stale_keys = set(self.cache.keys()) - {str(id) for id in current_ids}
+		# for key in stale_keys:
+		# 	del self.cache[key]
 
 	async def handle_message(self, message: aiomqtt.Message) -> None:
 		_logger.info(f"Handling message: {message.topic}")
 
 		message_data: str | dict[str, Any] = message.payload.decode()
-		matching_alarm_ids = self.topic_mapping.get(message.topic, set())
-		_logger.info(f"possible alarm ids: {self.topic_mapping}")
+		matching_alarm_ids = self.topic_mapping.get(str(message.topic), set())
+		_logger.info(f"possible alarm ids: {self.topic_mapping.keys()}")
 		_logger.info(f"Matching alarm ids: {matching_alarm_ids}")
-		_logger.info(f"Message data: {message_data}")
+		# _logger.info(f"Message data: {message_data}")
 
-		# TODO: not finding any matching alarm ids
 		if not matching_alarm_ids:
+			_logger.info(f"No matching alarms for topic: {message.topic}")
 			return
 
 		for alarm_id in matching_alarm_ids:
 			try:
-				alarm = self.cache.get(str(alarm_id))
+
+				# self.cache contains no keys
+				# stale entries was removing all the keys
+				alarm = self.cache.get(int(alarm_id))
 				if not alarm:
+					_logger.info(f"Alarm {alarm_id} not found in cache")
 					continue
 
 				# Create restricted environment with message data
+				if isinstance(message_data, str):
+					message_data = json.loads(message_data)
 				locals_dict = {"message": message_data}
 
 				# Evaluate the pre-compiled condition
