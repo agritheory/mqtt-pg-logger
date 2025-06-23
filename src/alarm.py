@@ -86,13 +86,12 @@ class Alarm:
 			_logger.error(f"Error getting last PID output for {pid_id}: {str(e)}")
 			return 0.0
 
-	async def load_alarms(self, sender: Any, **kwargs: str) -> None:
+	async def load_alarms(self, sender: Any) -> None:
 		query = """
 			SELECT id, condition, owner, topic, alarm_name, delivery_method, disabled
 			FROM alarm
 			WHERE disabled = FALSE
 		"""
-
 		rows = await current_app.db.fetch_all(query=query)
 		self.topic_mapping.clear()
 		current_ids = set()
