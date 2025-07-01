@@ -6,12 +6,12 @@ from types import CodeType
 from typing import Any
 
 import aiomqtt
-from blinker import signal
 from quart import current_app
 from RestrictedPython import compile_restricted
 from RestrictedPython.Guards import safe_builtins, safe_globals
 
 from src.pid import PIDControllerStore
+from src.signals import alarm_refresh_signal, alarm_triggered
 
 _logger = logging.getLogger(__name__)
 
@@ -47,10 +47,10 @@ class Alarm:
 				"_getitem_": lambda obj, key: obj[key],
 			}
 		)
-		self.alarm_refresh_signal = signal("refresh_alarms")
+		self.alarm_refresh_signal = alarm_refresh_signal
 		self.alarm_refresh_signal.connect(self.load_alarms)
 
-		self.alarm_triggered = signal("alarm_triggered")
+		self.alarm_triggered = alarm_triggered
 
 	# PID wrapper functions to expose to user alarm code
 	def pid_compute(
@@ -163,10 +163,9 @@ class Alarm:
 				continue
 
 	def trigger_alarm(self, alarm: CompiledAlarm, message_data: str | dict[str, Any]) -> None:
-		# Replace this with your notification implementation
-		_logger.error(f"ALARM TRIGGERED: {alarm.alarm_name} on topic {alarm.topic}")
-		self.alarm_triggered.send(sender=self, alarm=alarm, message_data=message_data)
-		_logger.error("Alarm Notifications are not yet implemented")
+		_logger.info(f"ALARM TRIGGERED: {alarm.alarm_name} on topic {alarm.topic}")
+		self.alarm_triggered.send(self, alarm=alarm, message_data=message_data)
+		_logger.info("Alarm Notifications are not yet implemented")
 
 	def get_all_pid_ids(self) -> list[str]:
 		return self.pid_store.get_all_pid_ids()

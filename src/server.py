@@ -1,7 +1,6 @@
 import logging
 
 import uvicorn
-from blinker import signal
 from environs import Env
 from quart import Quart
 from quart_cors import cors
@@ -10,6 +9,7 @@ from src.alarm import Alarm
 from src.create_schema import TimescaleDB
 from src.gql import graphql_bp
 from src.mqtt_logger import MQTTLogger
+from src.signals import alarm_refresh_signal
 
 logging.basicConfig(level=logging.INFO)
 _logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ def create_app() -> Quart:
 	cors_origins = env.list("CORS_ORIGINS", default=["*"])
 	app = cors(app, allow_origin=cors_origins)
 
-	@app.before_serving
+	@app.before_serving  # type: ignore[misc]
 	async def init_database() -> None:
 		await app.db.connect()
 
@@ -45,7 +45,7 @@ def create_app() -> Quart:
 		await mqtt_handler()
 
 		alarms = Alarm()
-		alarm_signal = signal("refresh_alarms")
+		alarm_signal = alarm_refresh_signal
 		await alarm_signal.send_async("refresh_alarms")
 
 	async def mqtt_handler() -> None:

@@ -4,11 +4,11 @@ from typing import Any
 import aiomqtt
 from aiomqtt import Client as AIOMQTTClient
 from aiomqtt import ProtocolVersion, TLSParameters
-from blinker import signal
 from databases import Database
 from environs import Env
 
 from alarm import Alarm
+from src.signals import topic_signal
 
 _logger = logging.getLogger(__name__)
 
@@ -30,8 +30,8 @@ class MQTTLogger:
 		self.log_all_topics = env.bool("LOG_ALL_TOPICS", False)
 		self.allow_all_topics = env.bool("ALLOW_ALL_TOPICS", False)
 		self.topics = {"#"} if self.allow_all_topics else set()
-		topic_signal = signal("topic")
-		topic_signal.connect(self.add_topic)
+		self.topic_signal = topic_signal
+		self.topic_signal.connect(self.add_topic)
 
 		if not env.bool("SSL_INSECURE"):
 			# TODO not tested or implemented

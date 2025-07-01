@@ -1,10 +1,15 @@
+import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from test.load_cell_example_data import amain as load_cell_data_async
 from typing import Any
 
 import pytest
-from blinker import signal
 from quart.testing import QuartClient
+
+from src.alarm import CompiledAlarm
+
+_logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------------
 # GraphQL documents
@@ -191,19 +196,34 @@ async def test_alarm_trigger(
 		token=token,
 		variables={"input": new_alarm_load_cell},
 	)
-	received = {}
+	alarm_id = resp["data"]["alarm"]["id"]
+	received: dict[str, Any] = {}
 
-	def receiver(sender: Any, **kwargs: Any) -> None:
-		received["alarm"] = kwargs.get("alarm")
-		received["data"] = kwargs.get("message_data")
+	def _receiver(sender: Any, **kwargs: Any) -> None:
+		received.update(kwargs)
 
-	triggered = signal("alarm_triggered")
-	triggered.connect(receiver)
+	from src.signals import alarm_triggered
+
+	alarm_triggered = alarm_triggered
+	alarm_triggered.connect(_receiver)
 
 	await load_cell_data_async(continuous=False)
+	await asyncio.sleep(0.1)
 
-	alarm = received.get("alarm")
-	assert alarm is not None, "No alarm was received"
-	assert alarm.alarm_name == new_alarm_load_cell["alarmName"]
+	alarm_triggered.disconnect(_receiver)
+	_logger.info("Received: %s", received)
+	assert "alarm" in received
+	assert "message_data" in received
 
-	triggered.disconnect(receiver)
+	alarm_obj = received["alarm"]
+	assert isinstance(alarm_obj, CompiledAlarm)
+	assert alarm_obj.id == int(alarm_id)
+	assert alarm_obj.topic == new_alarm_load_cell["topic"]
+	assert "weight" in alarm_obj.condition
+
+	msg = received["message_data"]
+	assert isinstance(msg, dict)
+	assert "measurement" in msg and "weight" in msg["measurement"]
+	weight = msg["measurement"]["weight"]["value"]
+	assert isinstance(weight, float)
+	assert weight > 0.0

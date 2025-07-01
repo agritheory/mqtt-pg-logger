@@ -12,11 +12,11 @@ from environs import Env
 
 from pid import PIDControllerStore
 
-# Configure logging and environment
-logging.basicConfig(
-	level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# # Configure logging and environment
+# logging.basicConfig(
+# 	level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# )
+_logger = logging.getLogger(__name__)
 env = Env()
 
 
@@ -51,10 +51,10 @@ async def setup_topic() -> bool:
 				},
 			)
 			login_data = login_response.json()
-			logger.debug(f"Login response: {login_data}")
+			_logger.debug(f"Login response: {login_data}")
 
 			if "errors" in login_data:
-				logger.error(f"Login failed: {login_data['errors']}")
+				_logger.error(f"Login failed: {login_data['errors']}")
 				return False
 
 			access_token = login_data["data"]["login"]["accessToken"]
@@ -73,21 +73,21 @@ async def setup_topic() -> bool:
 			)
 
 			create_data = create_response.json()
-			logger.debug(f"Create topic response: {create_data}")
+			_logger.debug(f"Create topic response: {create_data}")
 
 			if "errors" in create_data:
 				if "already exists" not in str(create_data["errors"]):
-					logger.error(f"Topic creation failed: {create_data['errors']}")
+					_logger.error(f"Topic creation failed: {create_data['errors']}")
 					return False
 				else:
-					logger.info("Topic already exists")
+					_logger.info("Topic already exists")
 			else:
-				logger.info(f"Topic created successfully: {topic_name}")
+				_logger.info(f"Topic created successfully: {topic_name}")
 
 			return True
 
 		except Exception as e:
-			logger.error(f"Setup failed: {e}", exc_info=True)
+			_logger.error(f"Setup failed: {e}", exc_info=True)
 			return False
 
 
@@ -97,7 +97,7 @@ def resolve_host(hostname: str) -> str:
 		socket.gethostbyname(hostname)
 		return hostname
 	except socket.gaierror:
-		logger.debug(f"Could not resolve {hostname}, falling back to localhost")
+		_logger.debug(f"Could not resolve {hostname}, falling back to localhost")
 		return "127.0.0.1"
 
 
@@ -128,11 +128,11 @@ class LoadCellPublisher:
 		self.excitation_voltage = 10.0  # VDC (within 5-10V range)
 		self.combined_error = 0.0003  # 0.03% expressed as decimal
 
-		logger.info(f"Initialized publisher for device {self.device_id}")
+		_logger.info(f"Initialized publisher for device {self.device_id}")
 
 	async def publish_data(self, interval: float = 1.0, continuous: bool = True) -> None:
 		"""Publish load cell data at specified interval."""
-		logger.info(f"Attempting to connect to MQTT broker at {self.broker}:{self.port}")
+		_logger.info(f"Attempting to connect to MQTT broker at {self.broker}:{self.port}")
 		try:
 			async with Client(
 				hostname=self.broker,
@@ -140,48 +140,47 @@ class LoadCellPublisher:
 				username=self.username,
 				password=self.password,
 			) as client:
-				logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
+				_logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
 
 				while True:
-					try:
-						payload = self.generate_payload()
-						topic = f"sensors/loadcell/{self.device_id}/data"
+					payload = self.generate_payload()
+					topic = f"sensors/loadcell/{self.device_id}/data"
 
-						logger.debug(f"Publishing to topic: {topic}")
-						logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
+					_logger.debug(f"Publishing to topic: {topic}")
+					_logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
 
-						await client.publish(topic=topic, payload=json.dumps(payload), qos=self.qos)
+					await client.publish(topic=topic, payload=json.dumps(payload), qos=self.qos)
 
-						PIDControllerStore().compute(
-							pid_id=topic,
-							setpoint=self.capacity_lb,
-							process_value=payload["measurement"]["weight"]["value"],
-						)
+					PIDControllerStore().compute(
+						pid_id=topic,
+						setpoint=self.capacity_lb,
+						process_value=payload["measurement"]["weight"]["value"],
+					)
 
-						logger.info(f"Published reading: {payload['measurement']['weight']['value']} lb")
+					_logger.info(f"Published reading: {payload['measurement']['weight']['value']} lb")
 
-						if continuous is False:
-							break
+					if not continuous:
+						break
 
-						await asyncio.sleep(interval)
+					await asyncio.sleep(interval)
 
-					except Exception as e:
-						logger.error(f"Error during publish: {e}", exc_info=True)
-						await asyncio.sleep(5)  # Wait before retry
+					# except Exception as e:
+					# 	_logger.error(f"Error during publish: {e}", exc_info=True)
+					# 	await asyncio.sleep(5)  # Wait before retry
 
 		except MqttError as e:
-			logger.error(f"MQTT Connection Error: {e}", exc_info=True)
+			_logger.error(f"MQTT Connection Error: {e}", exc_info=True)
 			if "Not authorized" in str(e):
-				logger.error("Authentication failed. Please verify:")
-				logger.error("1. MQTT_USER and MQTT_PASSWORD environment variables are set correctly")
-				logger.error("2. The credentials have proper permissions on the broker")
+				_logger.error("Authentication failed. Please verify:")
+				_logger.error("1. MQTT_USER and MQTT_PASSWORD environment variables are set correctly")
+				_logger.error("2. The credentials have proper permissions on the broker")
 			elif "Connection refused" in str(e):
-				logger.error("Connection refused. Please verify that:")
-				logger.error("1. The MQTT broker is running")
-				logger.error("2. The broker address and port are correct")
-				logger.error("3. If using docker-compose, ensure the service is up")
+				_logger.error("Connection refused. Please verify that:")
+				_logger.error("1. The MQTT broker is running")
+				_logger.error("2. The broker address and port are correct")
+				_logger.error("3. If using docker-compose, ensure the service is up")
 		except Exception as e:
-			logger.error(f"Unexpected error: {e}", exc_info=True)
+			_logger.error(f"Unexpected error: {e}", exc_info=True)
 
 	def generate_payload(self) -> dict:
 		"""Generate a realistic Rice Lake RL20000SS load cell reading with metadata."""
@@ -278,34 +277,38 @@ class LoadCellPublisher:
 
 
 async def amain(continuous: bool = True) -> None:
-	logger.info("Starting publisher")
+	_logger.info("Starting publisher")
 
 	# Setup topic before starting publisher
-	logger.info("Setting up topic...")
+	_logger.info("Setting up topic...")
 	if not await setup_topic():
-		logger.error("Failed to setup topic, exiting")
+		_logger.error("Failed to setup topic, exiting")
 		return
 
 	publisher = LoadCellPublisher()
 	try:
 		await publisher.publish_data(interval=2.0, continuous=continuous)
 	except KeyboardInterrupt:
-		logger.info("Shutting down publisher")
+		_logger.info("Shutting down publisher")
 	except Exception as e:
-		logger.error(f"Error in main: {e}", exc_info=True)
+		_logger.error(f"Error in main: {e}", exc_info=True)
 		raise
 
 
 def main(continuous: bool = True) -> None:
 	"""Entry point for the poetry script."""
 	try:
-		logger.info("Starting Load Cell Publisher")
+		_logger.info("Starting Load Cell Publisher")
 		asyncio.run(amain(continuous))
 	except KeyboardInterrupt:
-		logger.info("Publisher stopped by user")
+		_logger.info("Publisher stopped by user")
 	except Exception as e:
-		logger.error(f"Fatal error: {e}", exc_info=True)
+		_logger.error(f"Fatal error: {e}", exc_info=True)
 		sys.exit(1)
+
+
+async def amain_single() -> None:
+	"""Run a single iteration of the publisher."""
 
 
 if __name__ == "__main__":

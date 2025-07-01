@@ -9,13 +9,15 @@ from typing import Any
 import httpx
 import jwt  # PyJWT
 import strawberry
-from blinker import signal
 from cryptography.fernet import Fernet
 from environs import Env
 from graphql import GraphQLError
 from quart import Blueprint, Response, current_app, jsonify, request
+from strawberry import private
 from strawberry.asgi import GraphQL
 from strawberry.types import Info
+
+from src.signals import alarm_refresh_signal, topic_signal
 
 env = Env()
 
@@ -25,8 +27,7 @@ token_blacklist = set()
 
 _logger = logging.getLogger(__name__)
 
-topic_signal = signal("topic")
-alarm_signal = signal("refresh_alarms")
+alarm_signal = alarm_refresh_signal
 
 
 @dataclass
@@ -143,6 +144,7 @@ async def load_user_context(user_context: dict) -> "User":
 	return user
 
 
+@dataclass
 @strawberry.type
 class User:
 	id: int
@@ -152,13 +154,14 @@ class User:
 	modified: datetime.datetime
 	owner: str
 	modified_by: str
-	refresh_token: strawberry.Private[object]
-	sub: strawberry.Private[object]
-	exp: strawberry.Private[object]
-	iat: strawberry.Private[object]
-	jti: strawberry.Private[object]
+	refresh_token: strawberry.Private[str] = private("")
+	sub: strawberry.Private[str] = private("")
+	exp: strawberry.Private[str] = private("")
+	iat: strawberry.Private[str] = private("")
+	jti: strawberry.Private[str] = private("")
 
 
+@dataclass
 @strawberry.type
 class AuthResponse:
 	message: str
@@ -179,6 +182,7 @@ class RefreshTokenInput:
 	refresh_token: str
 
 
+@dataclass
 @strawberry.type
 class Topic:
 	id: int
@@ -203,6 +207,7 @@ class UserInput:
 	disabled: bool = False
 
 
+@dataclass
 @strawberry.type
 class Health:
 	status: str
@@ -212,6 +217,7 @@ class Health:
 	mqtt_connection: str
 
 
+@dataclass
 @strawberry.type
 class Alarm:
 	id: int
@@ -240,7 +246,7 @@ class AlarmInput:
 
 @strawberry.type
 class Query:
-	@strawberry.field
+	@strawberry.field  # type: ignore[misc]
 	@token_required
 	async def get_topics(self, info: Info[Context, Any]) -> list[Topic]:
 		query = """
@@ -252,7 +258,7 @@ class Query:
 		rows = await current_app.db.fetch_all(query=query)
 		return [Topic(**row) for row in rows]
 
-	@strawberry.field
+	@strawberry.field  # type: ignore[misc]
 	@token_required
 	async def get_topic(self, info: Info, topic_id: int) -> Topic | None:
 		query = """
@@ -263,7 +269,7 @@ class Query:
 		row = await current_app.db.fetch_one(query=query, values={"topic_id": topic_id})
 		return Topic(**row) if row else None
 
-	@strawberry.field
+	@strawberry.field  # type: ignore[misc]
 	@token_required
 	async def get_users(self, info: Info) -> list[User]:
 		query = """
@@ -273,9 +279,9 @@ class Query:
 		ORDER BY username
 		"""
 		rows = await current_app.db.fetch_all(query=query)
-		return [User(**row, refresh_token="", sub="", exp="", iat="", jti="") for row in rows]
+		return [User(**row) for row in rows]
 
-	@strawberry.field
+	@strawberry.field  # type: ignore[misc]
 	@token_required
 	async def get_user(self, info: Info, user_id: int) -> User | None:
 		query = """
@@ -286,7 +292,7 @@ class Query:
 		row = await current_app.db.fetch_one(query=query, values={"user_id": user_id})
 		return User(**row) if row else None
 
-	@strawberry.field
+	@strawberry.field  # type: ignore[misc]
 	@token_required
 	async def health(self, info: Info[Context, Any]) -> Health:
 		env = Env()
@@ -327,7 +333,7 @@ class Query:
 
 		return health_status
 
-	@strawberry.field
+	@strawberry.field  # type: ignore[misc]
 	@token_required
 	async def alarm(self, info: Info, id: int) -> Alarm | None:
 		"""Get a single alarm by ID"""
@@ -340,7 +346,7 @@ class Query:
 		row = await current_app.db.fetch_one(query=query, values={"alarm_id": id})
 		return Alarm(**dict(row)) if row else None
 
-	@strawberry.field
+	@strawberry.field  # type: ignore[misc]
 	@token_required
 	async def get_alarms(
 		self,
@@ -381,7 +387,7 @@ class Query:
 
 @strawberry.type
 class Mutation:
-	@strawberry.mutation
+	@strawberry.mutation  # type: ignore[misc]
 	async def login(self, info: Info[Context, Any], input: LoginInput) -> AuthResponse:
 		query = """
 			SELECT id, username, password_hash, disabled
@@ -426,7 +432,7 @@ class Mutation:
 			expires_in=env.int("ACCESS_TOKEN_EXPIRES"),
 		)
 
-	@strawberry.mutation
+	@strawberry.mutation  # type: ignore[misc]
 	async def refresh_token(self, info: Info[Context, Any], input: RefreshTokenInput) -> AuthResponse:
 		env = Env()
 		try:
@@ -458,33 +464,38 @@ class Mutation:
 			expires_in=env.int("ACCESS_TOKEN_EXPIRES"),
 		)
 
-	@strawberry.mutation
+	@strawberry.mutation  # type: ignore[misc]
 	@token_required
 	async def logout(self, info: Info[Context, Any]) -> bool:
 		user = await load_user_context(info.context.user)
 		token_blacklist.add(user.jti)
 		return True
 
-	@strawberry.mutation
+	@strawberry.mutation  # type: ignore[misc]
 	@token_required
 	async def create_topic(self, info: Info, input: TopicInput) -> Topic:
 		user = await load_user_context(info.context.user)
-		query = """
-		INSERT INTO topic (topic, disabled, owner, modified_by)
-		VALUES (:topic, :disabled, :owner, :modified_by)
-		RETURNING id, topic, disabled, creation, modified, owner, modified_by
-		"""
 		values = {
 			"topic": str(input.topic),
 			"disabled": bool(input.disabled),
 			"owner": user.username,
 			"modified_by": user.username,
 		}
+		query = """
+		INSERT INTO topic (topic, disabled, owner, modified_by)
+		VALUES (:topic, :disabled, :owner, :modified_by)
+		ON CONFLICT (topic) DO UPDATE
+		SET disabled    = EXCLUDED.disabled,
+			owner       = EXCLUDED.owner,
+			modified_by = EXCLUDED.modified_by,
+			modified    = NOW()
+		RETURNING id, topic, disabled, creation, modified, owner, modified_by
+		"""
 		row = await current_app.db.fetch_one(query=query, values=values)
-		await topic_signal.send_async("add_topic", topic=str(input.topic))
+		await topic_signal.send_async("add_topic", topic=values["topic"])
 		return Topic(**row)
 
-	@strawberry.mutation
+	@strawberry.mutation  # type: ignore[misc]
 	@token_required
 	async def update_topic(self, info: Info, id: int, input: TopicInput) -> Topic:
 		user = await load_user_context(info.context.user)
@@ -507,7 +518,7 @@ class Mutation:
 		await topic_signal.send("add_topic", topic=str(input.topic))
 		return Topic(**row)
 
-	@strawberry.mutation
+	@strawberry.mutation  # type: ignore[misc]
 	@token_required
 	async def create_user(self, info: Info, input: UserInput) -> User:
 		user = await load_user_context(info.context.user)
@@ -530,7 +541,7 @@ class Mutation:
 		row = await current_app.db.fetch_one(query=query, values=values)
 		return User(**row)
 
-	@strawberry.mutation
+	@strawberry.mutation  # type: ignore[misc]
 	@token_required
 	async def update_user(self, info: Info, id: int, input: UserInput) -> User:
 		user = await load_user_context(info.context.user)
@@ -554,7 +565,7 @@ class Mutation:
 		row = await current_app.db.fetch_one(query=query, values=values)
 		return User(**row)
 
-	@strawberry.mutation
+	@strawberry.mutation  # type: ignore[misc]
 	@token_required
 	async def alarm(self, info: Info, input: AlarmInput) -> Alarm:
 		user = await load_user_context(info.context.user)
@@ -617,7 +628,7 @@ schema = strawberry.Schema(query=Query, mutation=Mutation)
 graphql_app = GraphQL(schema)
 
 
-@graphql_bp.route("/", methods=["GET", "POST"])
+@graphql_bp.route("/", methods=["GET", "POST"])  # type: ignore[misc]
 async def graphql_handler() -> Response:
 	if request.method == "GET":
 		return Response(
