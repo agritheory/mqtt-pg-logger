@@ -13,7 +13,6 @@ from cryptography.fernet import Fernet
 from environs import Env
 from graphql import GraphQLError
 from quart import Blueprint, Response, current_app, jsonify, request
-from strawberry import private
 from strawberry.asgi import GraphQL
 from strawberry.types import Info
 
@@ -154,11 +153,11 @@ class User:
 	modified: datetime.datetime
 	owner: str
 	modified_by: str
-	refresh_token: strawberry.Private[str] = private("")
-	sub: strawberry.Private[str] = private("")
-	exp: strawberry.Private[str] = private("")
-	iat: strawberry.Private[str] = private("")
-	jti: strawberry.Private[str] = private("")
+	refresh_token: strawberry.Private[str]
+	sub: strawberry.Private[str]
+	exp: strawberry.Private[str]
+	iat: strawberry.Private[str]
+	jti: strawberry.Private[str]
 
 
 @dataclass
