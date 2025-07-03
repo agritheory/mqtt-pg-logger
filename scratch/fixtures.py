@@ -3,7 +3,7 @@ import asyncio
 from aiomqtt import Client, MqttError
 
 
-async def publish_temperature():
+async def publish_temperature() -> None:
 	# split host & port
 	async with Client(
 		hostname="artemis",  # from *inside* your app container
