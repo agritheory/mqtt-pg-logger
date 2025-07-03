@@ -7,7 +7,7 @@ from aiomqtt import ProtocolVersion, TLSParameters
 from databases import Database
 from environs import Env
 
-from alarm import Alarm
+from src.alarm import Alarm
 from src.signals import topic_signal
 
 _logger = logging.getLogger(__name__)
