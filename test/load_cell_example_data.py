@@ -131,6 +131,54 @@ class LoadCellPublisher:
 		_logger.info(f"Initialized publisher for device {self.device_id}")
 
 	async def publish_data(self, interval: float = 1.0, continuous: bool = True) -> None:
+		if continuous:
+			await self.publish_data_continous(interval)
+		else:
+			await self.publish_data_singular()
+
+	async def publish_data_singular(self) -> None:
+		"""Publish a single load cell data point."""
+		_logger.info(f"Attempting to connect to MQTT broker at {self.broker}:{self.port}")
+		try:
+			async with Client(
+				hostname=self.broker,
+				port=self.port,
+				username=self.username,
+				password=self.password,
+			) as client:
+				_logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
+
+				payload = self.generate_payload()
+				topic = f"sensors/loadcell/{self.device_id}/data"
+
+				_logger.debug(f"Publishing to topic: {topic}")
+				_logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
+
+				await client.publish(topic=topic, payload=json.dumps(payload), qos=self.qos)
+
+				PIDControllerStore().compute(
+					pid_id=topic,
+					setpoint=self.capacity_lb,
+					process_value=payload["measurement"]["weight"]["value"],
+				)
+
+				_logger.info(f"Published reading: {payload['measurement']['weight']['value']} lb")
+
+		except MqttError as e:
+			_logger.error(f"MQTT Connection Error: {e}", exc_info=True)
+			if "Not authorized" in str(e):
+				_logger.error("Authentication failed. Please verify:")
+				_logger.error("1. MQTT_USER and MQTT_PASSWORD environment variables are set correctly")
+				_logger.error("2. The credentials have proper permissions on the broker")
+			elif "Connection refused" in str(e):
+				_logger.error("Connection refused. Please verify that:")
+				_logger.error("1. The MQTT broker is running")
+				_logger.error("2. The broker address and port are correct")
+				_logger.error("3. If using docker-compose, ensure the service is up")
+		except Exception as e:
+			_logger.error(f"Unexpected error: {e}", exc_info=True)
+
+	async def publish_data_continous(self, interval: float = 1.0) -> None:
 		"""Publish load cell data at specified interval."""
 		_logger.info(f"Attempting to connect to MQTT broker at {self.broker}:{self.port}")
 		try:
@@ -159,14 +207,7 @@ class LoadCellPublisher:
 
 					_logger.info(f"Published reading: {payload['measurement']['weight']['value']} lb")
 
-					if not continuous:
-						break
-
 					await asyncio.sleep(interval)
-
-					# except Exception as e:
-					# 	_logger.error(f"Error during publish: {e}", exc_info=True)
-					# 	await asyncio.sleep(5)  # Wait before retry
 
 		except MqttError as e:
 			_logger.error(f"MQTT Connection Error: {e}", exc_info=True)
@@ -305,10 +346,6 @@ def main(continuous: bool = True) -> None:
 	except Exception as e:
 		_logger.error(f"Fatal error: {e}", exc_info=True)
 		sys.exit(1)
-
-
-async def amain_single() -> None:
-	"""Run a single iteration of the publisher."""
 
 
 if __name__ == "__main__":
