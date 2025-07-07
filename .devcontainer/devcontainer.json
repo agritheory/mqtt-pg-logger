@@ -1,0 +1,10 @@
+{
+	"name": "Existing Docker Compose (Extend)",
+	"dockerComposeFile": [
+		"../docker-compose.yml",
+		"docker-compose.yml"
+	],
+	"service": "mqtt-logger",
+	"workspaceFolder": "/app",
+	"postCreateCommand": "poetry install --with dev && pre-commit install"
+}
