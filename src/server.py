@@ -14,16 +14,29 @@ from src.signals import alarm_refresh_signal
 logging.basicConfig(level=logging.INFO)
 _logger = logging.getLogger(__name__)
 
-env = Env()
-env.read_env()
 
+def create_app(**kwargs: str | bool) -> Quart:
+	env = Env()
+	env.read_env()
 
-def create_app() -> Quart:
-	app = Quart(__name__)
-	app.db = TimescaleDB()
-	app.cache = {}
 	cors_origins = env.list("CORS_ORIGINS", default=["*"])
-	app = cors(app, allow_origin=cors_origins)
+	app = cors(Quart(__name__), allow_origin=cors_origins)
+	# db config
+	db_user = str(kwargs.get("db_user")) or env.str("DB_USER")
+	db_password = str(kwargs.get("db_user")) or env.str("DB_PASSWORD")
+	db_host = str(kwargs.get("db_host")) or env.str("DB_HOST")
+	db_port = str(kwargs.get("db_port")) or env.str("DB_PORT", "5432")
+	db_name = str(kwargs.get("db_name")) or env.str("DB_NAME")
+	force_rollback = bool(kwargs.get("force_rollback")) or env.bool("FORCE_ROLLBACK", False)
+	app.db = TimescaleDB(
+		db_user=db_user,
+		db_password=db_password,
+		db_host=db_host,
+		db_port=db_port,
+		db_name=db_name,
+		force_rollback=force_rollback,
+	)
+	app.cache = {}
 
 	@app.before_serving  # type: ignore[misc]
 	async def init_database() -> None:
@@ -35,7 +48,18 @@ def create_app() -> Quart:
 			try:
 				from src.create_schema import initialize_db
 
-				await initialize_db()
+				# fernet config
+				fernet_key = env.str("FERNET_KEY", None)
+				admin_email = env.str("ADMIN_EMAIL", None)
+				admin_password = env.str("ADMIN_PASSWORD", None)
+				mqtt_user = env.str("MQTT_USER")
+				await initialize_db(
+					app.db,
+					fernet_key=fernet_key,
+					admin_email=admin_email,
+					admin_password=admin_password,
+					mqtt_user=mqtt_user,
+				)
 				_logger.info("Database initialization completed")
 			except Exception as e:
 				_logger.error(f"Database initialization failed: {e}")
@@ -45,8 +69,7 @@ def create_app() -> Quart:
 		await mqtt_handler()
 
 		alarms = Alarm()
-		alarm_signal = alarm_refresh_signal
-		await alarm_signal.send_async("refresh_alarms")
+		await alarm_refresh_signal.send_async()
 
 	async def mqtt_handler() -> None:
 		broker_url = env.str("MQTT_BROKER_HOST", "localhost")
@@ -65,6 +88,8 @@ application = create_app()
 
 def main() -> None:
 	"""Entry point for the server"""
+	env = Env()
+	env.read_env()
 	_logger.info("Starting MQTT-Quart-Logger server...")
 	host = env.str("HOST", "0.0.0.0")
 	port = env.int("PORT", 5000)

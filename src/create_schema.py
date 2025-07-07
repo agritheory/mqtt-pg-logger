@@ -2,7 +2,6 @@ import logging
 
 from cryptography.fernet import Fernet
 from databases import Database
-from environs import Env
 
 logging.basicConfig(level=logging.INFO)
 _logger = logging.getLogger(__name__)
@@ -217,44 +216,29 @@ async def create_admin_user(
 		_logger.info(f"{admin_email} user created successfully")
 
 
-def TimescaleDB(**kwargs: str) -> Database:
-	env = Env()
-	env.read_env()
-
-	db_user = kwargs.get("db_user") or env.str("DB_USER")
-	db_password = kwargs.get("db_user") or env.str("DB_PASSWORD")
-	db_host = kwargs.get("db_host") or env.str("DB_HOST")
-	db_port = kwargs.get("db_port") or env.str("DB_PORT", "5432")
-	db_name = kwargs.get("db_name") or env.str("DB_NAME")
-
+def TimescaleDB(
+	db_user: str,
+	db_password: str,
+	db_host: str,
+	db_port: str,
+	db_name: str,
+	force_rollback: bool = False,
+) -> Database:
 	db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-	return Database(db_url)
+	return Database(db_url, force_rollback=force_rollback)
 
 
-async def initialize_db() -> None:
+async def initialize_db(
+	db: Database, fernet_key: str, admin_email: str, admin_password: str, mqtt_user: str
+) -> None:
 	"""Initialize database with schema and admin user"""
-	env = Env()
-	env.read_env()
-	db = TimescaleDB()
-	await db.connect()
+	async with db.transaction():
+		await create_schema(db)
 
-	try:
-		async with db.transaction():
-			await create_schema(db)
+		if all([fernet_key, admin_email, admin_password]):
+			fernet = Fernet(fernet_key)
+			await create_admin_user(db, fernet, admin_email, admin_password)
 
-			# Create admin user if credentials provided
-			fernet_key = env.str("FERNET_KEY", None)
-			admin_email = env.str("ADMIN_EMAIL", None)
-			admin_password = env.str("ADMIN_PASSWORD", None)
-
-			if all([fernet_key, admin_email, admin_password]):
-				fernet = Fernet(fernet_key)
-				await create_admin_user(db, fernet, admin_email, admin_password)
-
-			# Create MQTT service account
-			mqtt_user = env.str("MQTT_USER")
-			if fernet_key and mqtt_user:
-				await create_admin_user(db, fernet, mqtt_user, None)
-
-	finally:
-		await db.disconnect()
+		# Create MQTT service account
+		if fernet_key and mqtt_user:
+			await create_admin_user(db, fernet, mqtt_user, None)
