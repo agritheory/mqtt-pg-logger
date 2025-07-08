@@ -15,19 +15,20 @@ logging.basicConfig(level=logging.INFO)
 _logger = logging.getLogger(__name__)
 
 
-def create_app(**kwargs: str | bool) -> Quart:
+def create_app(**kwargs: str) -> Quart:
 	env = Env()
 	env.read_env()
 
 	cors_origins = env.list("CORS_ORIGINS", default=["*"])
 	app = cors(Quart(__name__), allow_origin=cors_origins)
 	# db config
-	db_user = str(kwargs.get("db_user")) or env.str("DB_USER")
-	db_password = str(kwargs.get("db_password")) or env.str("DB_PASSWORD")
-	db_host = str(kwargs.get("db_host")) or env.str("DB_HOST")
-	db_port = str(kwargs.get("db_port")) or env.str("DB_PORT", "5432")
-	db_name = str(kwargs.get("db_name")) or env.str("DB_NAME")
-	force_rollback = bool(kwargs.get("force_rollback")) or env.bool("FORCE_ROLLBACK", False)
+	db_user = (kwargs.get("db_user")) or env.str("DB_USER")
+	db_password = (kwargs.get("db_password")) or env.str("DB_PASSWORD")
+	db_host = (kwargs.get("db_host")) or env.str("DB_HOST")
+	db_port = kwargs.get("db_port") or env.str("DB_PORT", "5432")
+	db_name = (kwargs.get("db_name")) or env.str("DB_NAME")
+	force_rollback = (kwargs.get("force_rollback")) or env.bool("FORCE_ROLLBACK", False)
+	force_rollback = bool(force_rollback)
 	app.db = TimescaleDB(
 		db_user=db_user,
 		db_password=db_password,
