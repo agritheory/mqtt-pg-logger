@@ -23,7 +23,7 @@ def create_app(**kwargs: str | bool) -> Quart:
 	app = cors(Quart(__name__), allow_origin=cors_origins)
 	# db config
 	db_user = str(kwargs.get("db_user")) or env.str("DB_USER")
-	db_password = str(kwargs.get("db_user")) or env.str("DB_PASSWORD")
+	db_password = str(kwargs.get("db_password")) or env.str("DB_PASSWORD")
 	db_host = str(kwargs.get("db_host")) or env.str("DB_HOST")
 	db_port = str(kwargs.get("db_port")) or env.str("DB_PORT", "5432")
 	db_name = str(kwargs.get("db_name")) or env.str("DB_NAME")
