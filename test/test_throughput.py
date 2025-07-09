@@ -1,5 +1,7 @@
 import asyncio
+import gc
 import logging
+import tracemalloc
 from collections.abc import AsyncGenerator
 from test.load_cell_example_data import LoadCellPublisher, setup_topic
 
@@ -7,8 +9,9 @@ import pytest
 
 _logger = logging.getLogger(__name__)
 
-TARGET_RATE = 1000
-TARGET_DURATION = 3
+TARGET_RATE = 1000  # Hz
+TARGET_DURATION = 3  # s
+MAX_RAM = 100  # MiB
 
 
 @pytest.fixture  # type: ignore[misc]
@@ -61,6 +64,24 @@ async def test_throughput(publisher: LoadCellPublisher) -> None:
 	messages_per_second = i / TARGET_DURATION
 	_logger.info(f"Messages per second: {messages_per_second}")
 	assert messages_per_second > TARGET_RATE
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_peak_memory(publisher: LoadCellPublisher) -> None:
+	"""Run the publisher at 1 k msg/s for 3 s and check heap usage stays < 20 MiB."""
+	tracemalloc.start()
+	tracemalloc.reset_peak()
+
+	total_messages = TARGET_RATE * TARGET_DURATION
+	for _ in range(total_messages):
+		await publisher.publish_data_singular()
+
+	gc.collect()
+	current, peak = tracemalloc.get_traced_memory()
+	peak_mib = peak / 1024 / 1024
+	_logger.info("Peak traced heap: %.1f MiB", peak_mib)
+	assert peak_mib < MAX_RAM, f"Peak traced heap {peak_mib:.1f} MiB (limit {MAX_RAM} MiB)"
+	tracemalloc.stop()
 
 
 # @pytest.mark.asyncio
