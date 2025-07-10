@@ -1,10 +1,17 @@
+import os
+
+os.environ["TESTCONTAINERS_HOST_OVERRIDE"] = "host.docker.internal"
+
 import json
 import warnings
+from collections.abc import AsyncGenerator
 from typing import Any, cast
 
 import pytest
 import uvloop
+from databases import Database
 from quart.testing import QuartClient, TestApp
+from testcontainers.postgres import PostgresContainer
 
 from src.server import create_app
 
@@ -22,8 +29,8 @@ warnings.filterwarnings(
 
 
 @pytest.fixture  # type: ignore[misc]
-async def app() -> TestApp:
-	app = create_app(db_name="test_db", db_port="5432", force_rollback=True)
+async def app(db_url: str) -> AsyncGenerator[TestApp, None]:
+	app = create_app(db_url=db_url, force_rollback="True")
 	ctx = app.app_context()
 	await ctx.push()
 
@@ -35,6 +42,33 @@ async def app() -> TestApp:
 @pytest.fixture  # type: ignore[misc]
 def test_client(app: TestApp) -> QuartClient:
 	return app.test_client()
+
+
+@pytest.fixture(scope="session")  # type: ignore[misc]
+async def db_url() -> AsyncGenerator[str, None]:
+	"""
+	Start a TimescaleDB container (built on Postgres), create the timescaledb extension,
+	and yield the connection URL.
+	"""
+
+	image = "timescale/timescaledb:latest-pg16"
+
+	container = PostgresContainer(
+		image,
+		dbname="test_db",
+		username="postgres",
+		password="postgres",
+	)
+	container.start()
+
+	# _logger.info(f"Started TimescaleDB container: {container.get_connection_url()}")
+	db = Database(container.get_connection_url())
+	await db.connect()
+	db.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
+	await db.disconnect()
+	yield container.get_connection_url()
+
+	container.stop()
 
 
 @pytest.fixture  # type: ignore[misc]

@@ -1,6 +1,7 @@
 import logging
 
 import uvicorn
+from databases import Database
 from environs import Env
 from quart import Quart
 from quart_cors import cors
@@ -29,14 +30,18 @@ def create_app(**kwargs: str) -> Quart:
 	db_name = (kwargs.get("db_name")) or env.str("DB_NAME")
 	force_rollback = (kwargs.get("force_rollback")) or env.bool("FORCE_ROLLBACK", False)
 	force_rollback = bool(force_rollback)
-	app.db = TimescaleDB(
-		db_user=db_user,
-		db_password=db_password,
-		db_host=db_host,
-		db_port=db_port,
-		db_name=db_name,
-		force_rollback=force_rollback,
-	)
+	db_url = kwargs.get("db_url") or env.str("DB_URL", None)
+	if db_url:
+		app.db = Database(db_url, force_rollback=force_rollback)
+	else:
+		app.db = TimescaleDB(
+			db_user=db_user,
+			db_password=db_password,
+			db_host=db_host,
+			db_port=db_port,
+			db_name=db_name,
+			force_rollback=force_rollback,
+		)
 	app.cache = {}
 
 	@app.before_serving  # type: ignore[misc]

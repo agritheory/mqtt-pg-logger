@@ -1,8 +1,15 @@
+import os
+
+os.environ["TESTCONTAINERS_HOST_OVERRIDE"] = "host.docker.internal"
+
+import logging
 from collections.abc import AsyncGenerator
 
 import pytest
 from databases import Database
 from testcontainers.postgres import PostgresContainer
+
+_logger = logging.getLogger(__name__)
 
 
 @pytest.fixture(scope="session")  # type: ignore[misc]
@@ -14,14 +21,14 @@ async def test_db() -> AsyncGenerator[Database, None]:
 
 	image = "timescale/timescaledb:latest-pg16"
 
-	container = (
-		PostgresContainer(image)
-		.with_database("test_db")
-		.with_username("postgres")
-		.with_password("postgres")
+	container = PostgresContainer(
+		image,
+		dbname="test_db",
+		username="postgres",
+		password="postgres",
 	)
 	container.start()
-
+	_logger.info(f"Started TimescaleDB container: {container.get_connection_url()}")
 	db = Database(container.get_connection_url())
 	await db.connect()
 	db.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
