@@ -1,8 +1,13 @@
+from typing import Any
+
 import pytest
+from quart.testing import QuartClient
 
 
-@pytest.mark.asyncio
-async def test_successful_login(test_client, login_mutation, execute_graphql) -> None:
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_successful_login(
+	test_client: QuartClient, login_mutation: str, execute_graphql: Any
+) -> None:
 	response = await execute_graphql(login_mutation)
 	assert "data" in response
 	assert "login" in response["data"]
@@ -13,8 +18,8 @@ async def test_successful_login(test_client, login_mutation, execute_graphql) ->
 	assert response["data"]["login"]["expiresIn"] > 0
 
 
-@pytest.mark.asyncio
-async def test_failed_login(test_client, execute_graphql) -> None:
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_failed_login(test_client: QuartClient, execute_graphql: Any) -> None:
 	bad_login_mutation = """
         mutation {
             login(input: { username: "admin", password: "wrongpassword" }) {
@@ -28,8 +33,10 @@ async def test_failed_login(test_client, execute_graphql) -> None:
 	assert "Invalid credentials" in response["errors"][0]
 
 
-@pytest.mark.asyncio
-async def test_create_topic(test_client, login_mutation, topic_mutation, execute_graphql) -> None:
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_create_topic(
+	test_client: QuartClient, login_mutation: str, topic_mutation: str, execute_graphql: Any
+) -> None:
 	login_response = await execute_graphql(login_mutation)
 	token = login_response["data"]["login"]["accessToken"]
 
@@ -38,9 +45,9 @@ async def test_create_topic(test_client, login_mutation, topic_mutation, execute
 	assert len(response["data"]["createTopic"]) > 0
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_topics_query_with_valid_token(
-	test_client, login_mutation, topics_query, execute_graphql
+	test_client: QuartClient, login_mutation: str, topics_query: str, execute_graphql: Any
 ) -> None:
 	login_response = await execute_graphql(login_mutation)
 	token = login_response["data"]["login"]["accessToken"]
@@ -51,16 +58,22 @@ async def test_topics_query_with_valid_token(
 	assert len(response["data"]["getTopics"]) > 0
 
 
-@pytest.mark.asyncio
-async def test_topics_query_with_invalid_token(test_client, topics_query, execute_graphql) -> None:
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_topics_query_with_invalid_token(
+	test_client: QuartClient, topics_query: str, execute_graphql: Any
+) -> None:
 	response = await execute_graphql(topics_query, token="invalid_token")
 	assert "errors" in response
 	assert "Authorization required" in response["errors"][0]
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_successful_logout(
-	test_client, login_mutation, logout_mutation, topics_query, execute_graphql
+	test_client: QuartClient,
+	login_mutation: str,
+	logout_mutation: str,
+	topics_query: str,
+	execute_graphql: Any,
 ) -> None:
 	login_response = await execute_graphql(login_mutation)
 	token = login_response["data"]["login"]["accessToken"]
@@ -74,9 +87,13 @@ async def test_successful_logout(
 	assert "Authorization required" in topics_response["errors"][0]
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_using_token_after_logout(
-	test_client, login_mutation, logout_mutation, topics_query, execute_graphql
+	test_client: QuartClient,
+	login_mutation: str,
+	logout_mutation: str,
+	topics_query: str,
+	execute_graphql: Any,
 ) -> None:
 	login_response = await execute_graphql(login_mutation)
 	token = login_response["data"]["login"]["accessToken"]
@@ -92,9 +109,9 @@ async def test_using_token_after_logout(
 	assert "Authorization required" in topics_response_after_logout["errors"][0]
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_successful_token_refresh(
-	test_client, login_mutation, refresh_token_mutation, execute_graphql
+	test_client: QuartClient, login_mutation: str, refresh_token_mutation: str, execute_graphql: Any
 ) -> None:
 	login_response = await execute_graphql(login_mutation)
 	token = login_response["data"]["login"]["accessToken"]
@@ -114,9 +131,9 @@ async def test_successful_token_refresh(
 	assert refresh_response["data"]["refreshToken"]["expiresIn"] > 0
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio  # type: ignore[misc]
 async def test_failed_token_refresh(
-	test_client, refresh_token_mutation, login_mutation, execute_graphql
+	test_client: QuartClient, refresh_token_mutation: str, login_mutation: str, execute_graphql: Any
 ) -> None:
 	login_response = await execute_graphql(login_mutation)
 	token = login_response["data"]["login"]["accessToken"]

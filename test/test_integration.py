@@ -3,30 +3,17 @@ import datetime
 import json
 import warnings
 from collections.abc import AsyncGenerator
-from typing import Any
 
 import aiomqtt
 import pytest
 from environs import Env
-
-from src.server import create_app
+from quart.testing import TestApp
 
 env = Env()
 
 warnings.filterwarnings(
 	"ignore", message="The same attribute name/cookie name/salt is used by another QuartAuth instance"
 )
-
-
-@pytest.fixture  # type: ignore[misc]
-async def app(**kwargs: str) -> AsyncGenerator[None, None]:
-	app = create_app(force_rollback=True)
-	ctx = app.app_context()
-	await ctx.push()
-
-	await app.db.connect()
-	async with app.test_app() as test_app:
-		yield test_app
 
 
 @pytest.fixture  # type: ignore[misc]
@@ -48,7 +35,7 @@ async def mqtt_client() -> AsyncGenerator[aiomqtt.Client, None]:
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_mqtt_message_logging(
-	app: Any,
+	app: TestApp,
 	mqtt_client: aiomqtt.Client,
 ) -> None:
 	# Print background tasks status
