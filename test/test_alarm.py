@@ -1,7 +1,8 @@
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
-from test.load_cell_example_data import amain as load_cell_data_async
+from test.load_cell_example_data import LoadCellPublisher
 from typing import Any
 
 import pytest
@@ -207,7 +208,7 @@ async def test_alarm_trigger(
 	alarm_triggered = alarm_triggered
 	alarm_triggered.connect(_receiver)
 
-	await load_cell_data_async(continuous=False)
+	await LoadCellPublisher().publish_n_messages(1)
 	await asyncio.sleep(0.1)
 
 	alarm_triggered.disconnect(_receiver)
@@ -227,3 +228,56 @@ async def test_alarm_trigger(
 	weight = msg["measurement"]["weight"]["value"]
 	assert isinstance(weight, float)
 	assert weight > 0.0
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_alarm_latency(
+	test_client: QuartClient,
+	login_mutation: str,
+	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
+	new_alarm_load_cell: dict[str, Any],
+) -> None:
+	# --- setup and login ---
+	login_resp = await execute_graphql(login_mutation)
+	token = login_resp["data"]["login"]["accessToken"]
+	resp = await execute_graphql(
+		ALARM_MUTATION,
+		token=token,
+		variables={"input": new_alarm_load_cell},
+	)
+	alarm_id = resp["data"]["alarm"]["id"]
+
+	# Prepare to capture signal and latency
+	received: dict[str, Any] = {}
+	event = asyncio.Event()
+
+	def _receiver(sender: Any, **kwargs: Any) -> None:
+		# record when signal arrives and payload
+		received["timestamp"] = time.monotonic()
+		received["kwargs"] = kwargs
+		event.set()
+
+	from src.signals import alarm_triggered
+
+	alarm_triggered.connect(_receiver)
+
+	# mark start time, publish, and wait for signal
+	start_ts = time.monotonic()
+	await LoadCellPublisher().publish_n_messages(1)
+
+	try:
+		await asyncio.wait_for(event.wait(), timeout=1.0)
+	finally:
+		alarm_triggered.disconnect(_receiver)
+
+	# compute latency
+	end_ts = received["timestamp"]
+	latency = end_ts - start_ts
+	# assert latency threshold
+	_logger.info(f"Latency: {latency:.3f}s")
+	assert latency < 0.5, f"Latency too high: {latency:.3f}s"
+
+	# basic payload sanity checks (optional, can mirror test_alarm_trigger)
+	payload = received["kwargs"]
+	assert "alarm" in payload
+	assert "message_data" in payload

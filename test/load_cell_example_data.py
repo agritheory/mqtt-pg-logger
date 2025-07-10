@@ -119,6 +119,7 @@ class LoadCellPublisher:
 		self.capacity_lb = capacity_lb or 500
 
 		self.device_id = f"RL20000SS-{self.capacity_lb}LB"
+		self.topic = f"sensors/loadcell/{self.device_id}/data"
 		self.sequence = 0
 		self.last_calibration = datetime(2024, 10, 1, 8, 0, 0)
 
@@ -149,15 +150,14 @@ class LoadCellPublisher:
 				_logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
 
 				payload = self.generate_payload()
-				topic = f"sensors/loadcell/{self.device_id}/data"
 
-				_logger.debug(f"Publishing to topic: {topic}")
+				_logger.debug(f"Publishing to topic: {self.topic}")
 				_logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
 
-				await client.publish(topic=topic, payload=json.dumps(payload), qos=self.qos)
+				await client.publish(topic=self.topic, payload=json.dumps(payload), qos=self.qos)
 
 				PIDControllerStore().compute(
-					pid_id=topic,
+					pid_id=self.topic,
 					setpoint=self.capacity_lb,
 					process_value=payload["measurement"]["weight"]["value"],
 				)
@@ -177,6 +177,30 @@ class LoadCellPublisher:
 				_logger.error("3. If using docker-compose, ensure the service is up")
 		except Exception as e:
 			_logger.error(f"Unexpected error: {e}", exc_info=True)
+
+	async def _mqtt_client(self) -> Client:
+		return Client(
+			hostname=self.broker,
+			port=self.port,
+			username=self.username,
+			password=self.password,
+		)
+
+	async def publish_n_messages(self, n: int, max_in_flight: int = 100) -> None:
+		"""
+		Fire off up to `max_in_flight` publishes at a time,
+		waiting for ACKs before queuing more.
+		"""
+		async with await self._mqtt_client() as client:
+			sem = asyncio.Semaphore(max_in_flight)
+
+			async def _send() -> None:
+				# each send holds one slot in the semaphore until acked
+				async with sem:
+					await self.publish_data_static(client)
+
+			tasks = [asyncio.create_task(_send()) for _ in range(n)]
+			await asyncio.gather(*tasks)
 
 	async def publish_data_continous(self, interval: float = 1.0) -> None:
 		"""Publish load cell data at specified interval."""
@@ -208,6 +232,35 @@ class LoadCellPublisher:
 					_logger.info(f"Published reading: {payload['measurement']['weight']['value']} lb")
 
 					await asyncio.sleep(interval)
+		except MqttError as e:
+			_logger.error(f"MQTT Connection Error: {e}", exc_info=True)
+			if "Not authorized" in str(e):
+				_logger.error("Authentication failed. Please verify:")
+				_logger.error("1. MQTT_USER and MQTT_PASSWORD environment variables are set correctly")
+				_logger.error("2. The credentials have proper permissions on the broker")
+			elif "Connection refused" in str(e):
+				_logger.error("Connection refused. Please verify that:")
+				_logger.error("1. The MQTT broker is running")
+				_logger.error("2. The broker address and port are correct")
+				_logger.error("3. If using docker-compose, ensure the service is up")
+		except Exception as e:
+			_logger.error(f"Unexpected error: {e}", exc_info=True)
+
+	async def publish_data_static(self, client: Client) -> None:
+		try:
+			_logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
+
+			payload = self.generate_payload()
+
+			_logger.debug(f"Publishing to topic: {self.topic}")
+
+			await client.publish(topic=self.topic, payload=json.dumps(payload), qos=self.qos)
+
+			PIDControllerStore().compute(
+				pid_id=self.topic,
+				setpoint=self.capacity_lb,
+				process_value=payload["measurement"]["weight"]["value"],
+			)
 
 		except MqttError as e:
 			_logger.error(f"MQTT Connection Error: {e}", exc_info=True)
