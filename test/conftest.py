@@ -1,6 +1,13 @@
 import os
 
-os.environ["TESTCONTAINERS_HOST_OVERRIDE"] = "host.docker.internal"
+# Configure testcontainers for different environments
+if os.getenv("DEVCONTAINER"):
+	os.environ["TESTCONTAINERS_HOST_OVERRIDE"] = "host.docker.internal"
+else:
+	# Running outside devcontainer - use localhost
+	os.environ["TESTCONTAINERS_HOST_OVERRIDE"] = "localhost"
+	# Ensure testcontainers can find docker
+	os.environ["DOCKER_HOST"] = "unix:///var/run/docker.sock"
 
 import json
 import warnings
@@ -12,6 +19,7 @@ import uvloop
 from databases import Database
 from quart.testing import QuartClient, TestApp
 from testcontainers.postgres import PostgresContainer
+from websockets.asyncio.server import Server, ServerConnection, serve
 
 from src.server import create_app
 
@@ -59,6 +67,11 @@ async def db_url() -> AsyncGenerator[str, None]:
 		username="postgres",
 		password="postgres",
 	)
+
+	# Configure container for different environments
+	if not os.getenv("DEVCONTAINER"):
+		# Outside devcontainer, bind to a specific port to avoid conflicts
+		container.with_bind_ports(5432, None)  # Let testcontainers pick available port
 	container.start()
 
 	# _logger.info(f"Started TimescaleDB container: {container.get_connection_url()}")
@@ -158,3 +171,14 @@ def execute_graphql(test_client: QuartClient) -> Any:
 		return cast(dict[str, Any], json.loads(await resp.get_data()))
 
 	return _exec
+
+
+async def echo(websocket: ServerConnection) -> None:
+	async for message in websocket:
+		await websocket.send(message)
+
+
+@pytest.fixture(scope="module")  # type: ignore[misc]
+async def websocket_server() -> AsyncGenerator[Server, None]:
+	async with serve(echo, "localhost", 8765) as server:
+		yield server

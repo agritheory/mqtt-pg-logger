@@ -21,6 +21,7 @@ httpx = "^0.27.2"
 restrictedpython = "^7.4"
 testcontainers = {extras = ["postgres"], version = "^4.10.0"}
 types-pyyaml = "^6.0.12.20250516"
+websockets = "^15.0.1"
 
 [tool.poetry.scripts]
 start = "src.server:main"
