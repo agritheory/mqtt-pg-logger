@@ -1,10 +1,12 @@
+import argparse
 import asyncio
 import json
 import logging
 import random
 import socket
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import httpx
 from aiomqtt import Client, MqttError
@@ -131,13 +133,15 @@ class LoadCellPublisher:
 
 		_logger.info(f"Initialized publisher for device {self.device_id}")
 
-	async def publish_data(self, interval: float = 1.0, continuous: bool = True) -> None:
+	async def publish_data(
+		self, interval: float = 1.0, continuous: bool = True, payload_weight: float | None = None
+	) -> None:
 		if continuous:
-			await self.publish_data_continous(interval)
+			await self.publish_data_continous(interval, payload_weight=None)
 		else:
-			await self.publish_data_singular()
+			await self.publish_data_singular(payload_weight=None)
 
-	async def publish_data_singular(self) -> None:
+	async def publish_data_singular(self, payload_weight: float | None = None) -> None:
 		"""Publish a single load cell data point."""
 		_logger.info(f"Attempting to connect to MQTT broker at {self.broker}:{self.port}")
 		try:
@@ -149,8 +153,8 @@ class LoadCellPublisher:
 			) as client:
 				_logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
 
-				payload = self.generate_payload()
-
+				payload = self.generate_payload(payload_weight=payload_weight)
+				print(payload)
 				_logger.debug(f"Publishing to topic: {self.topic}")
 				_logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
 
@@ -186,7 +190,9 @@ class LoadCellPublisher:
 			password=self.password,
 		)
 
-	async def publish_n_messages(self, n: int, max_in_flight: int = 100) -> None:
+	async def publish_n_messages(
+		self, n: int, max_in_flight: int = 100, payload_weight: float | None = None
+	) -> None:
 		"""
 		Fire off up to `max_in_flight` publishes at a time,
 		waiting for ACKs before queuing more.
@@ -197,12 +203,14 @@ class LoadCellPublisher:
 			async def _send() -> None:
 				# each send holds one slot in the semaphore until acked
 				async with sem:
-					await self.publish_data_static(client)
+					await self.publish_data_static(client, payload_weight=payload_weight)
 
 			tasks = [asyncio.create_task(_send()) for _ in range(n)]
 			await asyncio.gather(*tasks)
 
-	async def publish_data_continous(self, interval: float = 1.0) -> None:
+	async def publish_data_continous(
+		self, interval: float = 1.0, payload_weight: float | None = None
+	) -> None:
 		"""Publish load cell data at specified interval."""
 		_logger.info(f"Attempting to connect to MQTT broker at {self.broker}:{self.port}")
 		try:
@@ -215,7 +223,7 @@ class LoadCellPublisher:
 				_logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
 
 				while True:
-					payload = self.generate_payload()
+					payload = self.generate_payload(payload_weight=payload_weight)
 					topic = f"sensors/loadcell/{self.device_id}/data"
 
 					_logger.debug(f"Publishing to topic: {topic}")
@@ -246,11 +254,11 @@ class LoadCellPublisher:
 		except Exception as e:
 			_logger.error(f"Unexpected error: {e}", exc_info=True)
 
-	async def publish_data_static(self, client: Client) -> None:
+	async def publish_data_static(self, client: Client, payload_weight: float | None = None) -> None:
 		try:
 			_logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
 
-			payload = self.generate_payload()
+			payload = self.generate_payload(payload_weight=payload_weight)
 
 			_logger.debug(f"Publishing to topic: {self.topic}")
 
@@ -276,7 +284,7 @@ class LoadCellPublisher:
 		except Exception as e:
 			_logger.error(f"Unexpected error: {e}", exc_info=True)
 
-	def generate_payload(self) -> dict:
+	def generate_payload(self, payload_weight: float | None = None) -> dict[str, Any]:
 		"""Generate a realistic Rice Lake RL20000SS load cell reading with metadata."""
 		self.sequence += 1
 
@@ -316,11 +324,11 @@ class LoadCellPublisher:
 				"capacity_lb": self.capacity_lb,
 				"location": "Production-Line-1",
 			},
-			"timestamp": datetime.utcnow().isoformat() + "Z",
+			"timestamp": datetime.now(timezone.utc).isoformat(),
 			"sequence": self.sequence,
 			"measurement": {
 				"weight": {
-					"value": round(actual_load, 2),
+					"value": payload_weight if payload_weight else round(actual_load, 2),
 					"unit": "lb",
 					"precision": 0.01,
 					"status": "stable" if abs(load_error) < (self.capacity_lb * 0.0001) else "settling",
@@ -334,8 +342,8 @@ class LoadCellPublisher:
 				"combined_error_percent": 0.03,
 			},
 			"calibration": {
-				"last_calibration": self.last_calibration.isoformat() + "Z",
-				"next_calibration_due": (self.last_calibration + timedelta(days=180)).isoformat() + "Z",
+				"last_calibration": self.last_calibration.isoformat(),
+				"next_calibration_due": (self.last_calibration + timedelta(days=180)).isoformat(),
 				"ntep_certification": "CC 98-078",
 				"environment_rating": "IP67",
 			},
@@ -346,7 +354,7 @@ class LoadCellPublisher:
 				"warning_flags": warning_flags,
 			},
 			"metadata": {
-				"batch_id": f"B{datetime.now().strftime('%y-%m-%d-%p')}",
+				"batch_id": f"B{datetime.now(timezone.utc).isoformat()}",
 				"product_code": "PROD-392",
 				"cable_details": {
 					"length_ft": 20,
@@ -401,5 +409,49 @@ def main(continuous: bool = True) -> None:
 		sys.exit(1)
 
 
+async def cli_main() -> None:
+	"""CLI entry point with argument parsing."""
+	parser = argparse.ArgumentParser(description="Load Cell Data Publisher")
+	parser.add_argument(
+		"--mode",
+		choices=["continuous", "singular", "n_messages"],
+		default="continuous",
+		help="Publishing mode (default: continuous)",
+	)
+	parser.add_argument("--payload-weight", type=float, help="Override payload weight value")
+	parser.add_argument(
+		"--count", type=int, default=1, help="Number of messages to publish (for n_messages mode)"
+	)
+	parser.add_argument(
+		"--interval",
+		type=float,
+		default=1.0,
+		help="Interval between messages in seconds (for continuous mode)",
+	)
+
+	args = parser.parse_args()
+
+	publisher = LoadCellPublisher()
+
+	try:
+		if args.mode == "continuous":
+			_logger.info(f"Starting continuous publishing with interval {args.interval}s")
+			await publisher.publish_data_continous(
+				interval=args.interval, payload_weight=args.payload_weight
+			)
+		elif args.mode == "singular":
+			_logger.info("Publishing single message")
+			await publisher.publish_data_singular(payload_weight=args.payload_weight)
+		elif args.mode == "n_messages":
+			_logger.info(f"Publishing {args.count} messages")
+			await publisher.publish_n_messages(args.count, payload_weight=args.payload_weight)
+
+	except KeyboardInterrupt:
+		_logger.info("Publisher stopped by user")
+	except Exception as e:
+		_logger.error(f"Fatal error: {e}", exc_info=True)
+		sys.exit(1)
+
+
 if __name__ == "__main__":
-	main()
+	asyncio.run(cli_main())

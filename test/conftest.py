@@ -178,7 +178,7 @@ async def echo(websocket: ServerConnection) -> None:
 		await websocket.send(message)
 
 
-@pytest.fixture(scope="module")  # type: ignore[misc]
+@pytest.fixture  # type: ignore[misc]
 async def websocket_server() -> AsyncGenerator[Server, None]:
 	async with serve(echo, "localhost", 8765) as server:
 		yield server

@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from quart.testing import QuartClient
+from websockets.asyncio.client import connect
 
 from src.alarm import CompiledAlarm
 
@@ -281,3 +282,60 @@ async def test_alarm_latency(
 	payload = received["kwargs"]
 	assert "alarm" in payload
 	assert "message_data" in payload
+
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_alarm_trigger_websocket(
+	test_client: QuartClient,
+	login_mutation: str,
+	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
+	new_alarm_load_cell: dict[str, Any],
+) -> None:
+	# override condition
+	new_alarm_load_cell["condition"] = "message['measurement']['weight']['value'] >= 500"
+	login_resp = await execute_graphql(login_mutation)
+	token = login_resp["data"]["login"]["accessToken"]
+
+	resp = await execute_graphql(
+		ALARM_MUTATION,
+		token=token,
+		variables={"input": new_alarm_load_cell},
+	)
+	alarm_id = resp["data"]["alarm"]["id"]
+	received: dict[str, Any] = {}
+
+	def _receiver(sender: Any, **kwargs: Any) -> None:
+		received.update(kwargs)
+
+	from src.signals import alarm_triggered
+
+	alarm_triggered = alarm_triggered
+	alarm_triggered.connect(_receiver)
+
+	await LoadCellPublisher().publish_n_messages(1, 500)
+	await asyncio.sleep(0.1)
+
+	alarm_triggered.disconnect(_receiver)
+	_logger.info("Received: %s", received)
+	assert "alarm" in received
+	assert "message_data" in received
+
+	alarm_obj = received["alarm"]
+	assert isinstance(alarm_obj, CompiledAlarm)
+	assert alarm_obj.id == int(alarm_id)
+	assert alarm_obj.topic == new_alarm_load_cell["topic"]
+	assert "weight" in alarm_obj.condition
+
+	msg = received["message_data"]
+	assert isinstance(msg, dict)
+	assert "measurement" in msg and "weight" in msg["measurement"]
+	weight = msg["measurement"]["weight"]["value"]
+	assert isinstance(weight, float)
+	assert weight == 500
+
+	# Send alarm to websocket
+	alarm_str = f"Load cell overload with weight: {weight}"
+	async with connect("ws://localhost:8765") as websocket:
+		await websocket.send(alarm_str)
+		message = await websocket.recv()
+		assert message == alarm_str
