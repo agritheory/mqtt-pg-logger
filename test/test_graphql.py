@@ -47,10 +47,17 @@ async def test_create_topic(
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_topics_query_with_valid_token(
-	test_client: QuartClient, login_mutation: str, topics_query: str, execute_graphql: Any
+	test_client: QuartClient,
+	login_mutation: str,
+	topic_mutation: str,
+	topics_query: str,
+	execute_graphql: Any,
 ) -> None:
 	login_response = await execute_graphql(login_mutation)
 	token = login_response["data"]["login"]["accessToken"]
+
+	# Create a topic first so the list is non-empty
+	await execute_graphql(topic_mutation, token=token)
 
 	response = await execute_graphql(topics_query, token=token)
 	assert "data" in response
@@ -92,11 +99,15 @@ async def test_using_token_after_logout(
 	test_client: QuartClient,
 	login_mutation: str,
 	logout_mutation: str,
+	topic_mutation: str,
 	topics_query: str,
 	execute_graphql: Any,
 ) -> None:
 	login_response = await execute_graphql(login_mutation)
 	token = login_response["data"]["login"]["accessToken"]
+
+	# Create a topic first so the list is non-empty
+	await execute_graphql(topic_mutation, token=token)
 
 	topics_response = await execute_graphql(topics_query, token=token)
 	assert "data" in topics_response

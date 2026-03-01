@@ -5,7 +5,7 @@ from websockets.asyncio.server import Server
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_hello(websocket_server: Server) -> None:
-	async with connect("ws://localhost:8765") as websocket:
+	async with connect("ws://127.0.0.1:8765") as websocket:
 		await websocket.send("Hello world!")
 		message = await websocket.recv()
 		assert message == "Hello world!"

@@ -218,6 +218,16 @@ class Health:
 
 @dataclass
 @strawberry.type
+class JournalEntry:
+	id: int
+	topic: str
+	text: str
+	data: strawberry.scalars.JSON | None
+	creation: datetime.datetime
+
+
+@dataclass
+@strawberry.type
 class Alarm:
 	id: int
 	condition: str
@@ -229,6 +239,7 @@ class Alarm:
 	topic: str
 	alarm_name: str
 	delivery_method: str
+	webhook_url: str | None
 
 
 @strawberry.input
@@ -241,6 +252,7 @@ class AlarmInput:
 	delivery_method: str
 	disabled: bool = False
 	id: int | None = None
+	webhook_url: str | None = None
 
 
 @strawberry.type
@@ -334,11 +346,50 @@ class Query:
 
 	@strawberry.field  # type: ignore[misc]
 	@token_required
+	async def get_journal_entries(
+		self,
+		info: Info,
+		topic: str | None = None,
+		start_time: datetime.datetime | None = None,
+		end_time: datetime.datetime | None = None,
+		limit: int = 100,
+	) -> list[JournalEntry]:
+		conditions = []
+		values: dict = {}
+
+		if topic is not None:
+			conditions.append("topic = :topic")
+			values["topic"] = topic
+
+		if start_time is not None:
+			conditions.append("creation >= :start_time")
+			values["start_time"] = start_time
+
+		if end_time is not None:
+			conditions.append("creation <= :end_time")
+			values["end_time"] = end_time
+
+		where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+		query = f"""
+			SELECT id, topic, text, data, creation
+			FROM journal
+			{where_clause}
+			ORDER BY creation DESC
+			LIMIT :limit
+		"""
+		values["limit"] = min(limit, 1000)
+
+		rows = await current_app.db.fetch_all(query=query, values=values)
+		return [JournalEntry(**dict(row)) for row in rows]
+
+	@strawberry.field  # type: ignore[misc]
+	@token_required
 	async def alarm(self, info: Info, id: int) -> Alarm | None:
 		"""Get a single alarm by ID"""
 		query = """
 			SELECT id, condition, owner, creation, modified, modified_by,
-				disabled, topic, alarm_name, delivery_method
+				disabled, topic, alarm_name, delivery_method, webhook_url
 			FROM alarm
 			WHERE id = :alarm_id
 		"""
@@ -374,7 +425,7 @@ class Query:
 
 		query = f"""
 			SELECT id, condition, owner, creation, modified, modified_by,
-				disabled, topic, alarm_name, delivery_method
+				disabled, topic, alarm_name, delivery_method, webhook_url
 			FROM alarm
 			{where_clause}
 			ORDER BY modified DESC
@@ -514,7 +565,7 @@ class Mutation:
 			"modified_by": user.username,
 		}
 		row = await current_app.db.fetch_one(query=query, values=values)
-		await topic_signal.send("add_topic", topic=str(input.topic))
+		await topic_signal.send_async("add_topic", topic=str(input.topic))
 		return Topic(**row)
 
 	@strawberry.mutation  # type: ignore[misc]
@@ -544,6 +595,8 @@ class Mutation:
 	@token_required
 	async def update_user(self, info: Info, id: int, input: UserInput) -> User:
 		user = await load_user_context(info.context.user)
+		env = Env()
+		f = Fernet(env.str("FERNET_KEY").encode())
 		query = """
 		UPDATE "user"
 		SET username = :username,
@@ -557,7 +610,7 @@ class Mutation:
 		values = {
 			"id": id,
 			"username": input.username,
-			"password": Fernet.encrypt(input.password.encode()),
+			"password": f.encrypt(input.password.encode()),
 			"disabled": input.disabled,
 			"modified_by": user.username,
 		}
@@ -573,14 +626,14 @@ class Mutation:
 			query = """
 				INSERT INTO alarm (
 					condition, owner, modified_by, topic,
-					alarm_name, delivery_method, disabled
+					alarm_name, delivery_method, disabled, webhook_url
 				)
 				VALUES (
 					:condition, :owner, :modified_by, :topic,
-					:alarm_name, :delivery_method, :disabled
+					:alarm_name, :delivery_method, :disabled, :webhook_url
 				)
 				RETURNING id, condition, owner, creation, modified, modified_by,
-					disabled, topic, alarm_name, delivery_method
+					disabled, topic, alarm_name, delivery_method, webhook_url
 			"""
 			values = {
 				"condition": input.condition,
@@ -590,6 +643,7 @@ class Mutation:
 				"alarm_name": input.alarm_name,
 				"delivery_method": input.delivery_method,
 				"disabled": input.disabled,
+				"webhook_url": input.webhook_url,
 			}
 		else:
 			# Update existing alarm
@@ -602,10 +656,11 @@ class Mutation:
 					alarm_name = :alarm_name,
 					delivery_method = :delivery_method,
 					disabled = :disabled,
+					webhook_url = :webhook_url,
 					modified = CURRENT_TIMESTAMP
 				WHERE id = :id
 				RETURNING id, condition, owner, creation, modified, modified_by,
-									disabled, topic, alarm_name, delivery_method
+					disabled, topic, alarm_name, delivery_method, webhook_url
 			"""
 			values = {
 				"id": input.id,
@@ -616,6 +671,7 @@ class Mutation:
 				"alarm_name": input.alarm_name,
 				"delivery_method": input.delivery_method,
 				"disabled": input.disabled,
+				"webhook_url": input.webhook_url,
 			}
 
 		row = await current_app.db.fetch_one(query=query, values=values)

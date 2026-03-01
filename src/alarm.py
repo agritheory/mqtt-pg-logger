@@ -6,6 +6,7 @@ from types import CodeType
 from typing import Any
 
 import aiomqtt
+import httpx
 from quart import current_app
 from RestrictedPython import compile_restricted
 from RestrictedPython.Guards import safe_builtins, safe_globals
@@ -26,6 +27,7 @@ class CompiledAlarm:
 	owner: str
 	disabled: bool
 	byte_code: CodeType  # Compiled Python code object
+	webhook_url: str | None = None
 
 
 class Alarm:
@@ -90,7 +92,7 @@ class Alarm:
 
 	async def load_alarms(self, sender: Any) -> None:
 		query = """
-			SELECT id, condition, owner, topic, alarm_name, delivery_method, disabled
+			SELECT id, condition, owner, topic, alarm_name, delivery_method, disabled, webhook_url
 			FROM alarm
 			WHERE disabled = FALSE
 		"""
@@ -113,15 +115,16 @@ class Alarm:
 				owner=row["owner"],
 				disabled=row["disabled"],
 				byte_code=byte_code,
+				webhook_url=row["webhook_url"],
 			)
 
 			self.cache[alarm_id] = cached_alarm
 			self.topic_mapping[row["topic"]].add(alarm_id)
 
-		# # Remove stale entries
-		# stale_keys = set(self.cache.keys()) - {str(id) for id in current_ids}
-		# for key in stale_keys:
-		# 	del self.cache[key]
+		# Remove stale entries (compare int keys consistently)
+		stale_keys = set(self.cache.keys()) - current_ids
+		for key in stale_keys:
+			del self.cache[key]
 
 	async def handle_message(self, message: aiomqtt.Message) -> None:
 		_logger.info(f"Handling message: {message.topic}")
@@ -138,9 +141,6 @@ class Alarm:
 
 		for alarm_id in matching_alarm_ids:
 			try:
-
-				# self.cache contains no keys
-				# stale entries was removing all the keys
 				alarm = self.cache.get(int(alarm_id))
 				if not alarm:
 					_logger.info(f"Alarm {alarm_id} not found in cache")
@@ -156,16 +156,36 @@ class Alarm:
 				# filter/forward code here
 
 				if result:
-					self.trigger_alarm(alarm, message_data)
+					await self.trigger_alarm(alarm, message_data)
 
 			except Exception as e:
 				_logger.error(f"Error processing alarm {alarm_id}: {str(e)}")
 				continue
 
-	def trigger_alarm(self, alarm: CompiledAlarm, message_data: str | dict[str, Any]) -> None:
+	async def trigger_alarm(self, alarm: CompiledAlarm, message_data: str | dict[str, Any]) -> None:
 		_logger.info(f"ALARM TRIGGERED: {alarm.alarm_name} on topic {alarm.topic}")
 		self.alarm_triggered.send(self, alarm=alarm, message_data=message_data)
-		_logger.info("Alarm Notifications are not yet implemented")
+
+		if alarm.webhook_url:
+			try:
+				async with httpx.AsyncClient() as client:
+					await client.post(
+						alarm.webhook_url,
+						json={
+							"alarm_name": alarm.alarm_name,
+							"topic": alarm.topic,
+							"condition": alarm.condition,
+							"message_data": message_data,
+						},
+						timeout=5.0,
+					)
+				_logger.info(f"Webhook delivered for alarm '{alarm.alarm_name}' to {alarm.webhook_url}")
+			except Exception as e:
+				_logger.error(
+					f"Webhook delivery failed for alarm '{alarm.alarm_name}' to {alarm.webhook_url}: {e}"
+				)
+		else:
+			_logger.info(f"No webhook_url set for alarm '{alarm.alarm_name}'; skipping delivery")
 
 	def get_all_pid_ids(self) -> list[str]:
 		return self.pid_store.get_all_pid_ids()

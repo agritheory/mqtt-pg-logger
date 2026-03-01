@@ -1,13 +1,15 @@
 import asyncio
 import datetime
 import json
+import os
 import warnings
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from typing import Any
 
 import aiomqtt
 import pytest
 from environs import Env
-from quart.testing import TestApp
+from quart.testing import QuartClient, TestApp
 
 env = Env()
 
@@ -20,66 +22,57 @@ warnings.filterwarnings(
 async def mqtt_client() -> AsyncGenerator[aiomqtt.Client, None]:
 	username = env.str("MQTT_USER", "artemis")
 	password = env.str("MQTT_PASSWORD", "artemis")
+	host = os.environ.get("MQTT_BROKER_HOST", "localhost")
+	port = int(os.environ.get("MQTT_BROKER_PORT", "1883"))
 
-	try:
-		async with aiomqtt.Client(
-			hostname="localhost",
-			port=1883,
-			username=username,
-			password=password,
-		) as client:
-			yield client
-	except aiomqtt.MqttError as e:
-		pytest.skip(f"MQTT Broker not available: {str(e)}")
+	async with aiomqtt.Client(
+		hostname=host,
+		port=port,
+		username=username,
+		password=password,
+	) as client:
+		yield client
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_mqtt_message_logging(
 	app: TestApp,
+	test_client: QuartClient,
 	mqtt_client: aiomqtt.Client,
+	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
+	login_mutation: str,
 ) -> None:
-	# Print background tasks status
-	print("\nBackground tasks at start:")
-	for task in app.background_tasks:
-		print(f"Task {task}: {task.done()}")
-
 	test_topic = "test/logging"
 	test_payload = {
 		"message": "test message",
 		"timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
 	}
 
-	# Log before publishing
-	print(f"\nPublishing message to {test_topic}")
+	# Register the topic so the MQTTLogger's Python-side filter accepts messages for it.
+	# createTopic emits topic_signal, which calls MQTTLogger.add_topic in the background task.
+	login_resp = await execute_graphql(login_mutation)
+	token = login_resp["data"]["login"]["accessToken"]
+	await execute_graphql(
+		f'mutation {{ createTopic(input: {{topic: "{test_topic}"}}) {{ id }} }}',
+		token=token,
+	)
+	# Brief yield so the topic_signal propagates to the background task before we publish.
+	await asyncio.sleep(0.1)
+
 	await mqtt_client.publish(test_topic, payload=json.dumps(test_payload).encode(), qos=1)
 
-	# Wait for message to be processed
+	# Wait for the background task to process and store the message.
 	await asyncio.sleep(2)
 
-	# Query for the record
-	record = await app.db.fetch_one(
+	record = await app.app.db.fetch_one(
 		query="""
 			SELECT * FROM journal
 			WHERE topic = :topic
 			ORDER BY creation DESC
 			LIMIT 1
 		""",
-		values={
-			"topic": test_topic,
-		},
+		values={"topic": test_topic},
 	)
-
-	# Print all records for debugging
-	print("\nChecking database records:")
-	all_records = await app.db.fetch_all(query="SELECT * FROM journal ORDER BY creation DESC LIMIT 5")
-	print("\nLast 5 records in database:")
-	for r in all_records:
-		print(f"Topic: {r['topic']}, Payload: {r['payload']}")
-
-	# Print background tasks status again
-	print("\nBackground tasks at end:")
-	for task in app.background_tasks:
-		print(f"Task {task}: {task.done()}")
 
 	assert record is not None, "No matching record found in database"
 	assert record["topic"] == test_topic

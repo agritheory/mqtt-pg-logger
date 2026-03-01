@@ -66,7 +66,7 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 	for index in indexes:
 		await db.execute(index)
 
-	# Create function
+	# Create trigger function
 	await db.execute(
 		r"""
 		CREATE OR REPLACE FUNCTION journal_text_to_json()
@@ -88,25 +88,17 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 		"""
 	)
 
-	# Drop and create trigger separately
+	# Attach trigger to journal table (idempotent via DROP IF EXISTS guard)
 	await db.execute(
-		r"""
-		CREATE OR REPLACE FUNCTION journal_text_to_json()
-		RETURNS TRIGGER
-		LANGUAGE PLPGSQL
-		AS
-		$$
-		BEGIN
-				IF NEW.data IS NULL AND NEW.text IS NOT NULL AND NEW.text SIMILAR TO '(\{|\[)%' THEN
-						BEGIN
-								NEW.data = NEW.text::JSON;
-						EXCEPTION WHEN OTHERS THEN
-								NEW.data = NULL;
-						END;
-				END IF;
-				RETURN NEW;
-		END;
-		$$
+		"""
+		DROP TRIGGER IF EXISTS journal_text_to_json_trigger ON journal;
+		"""
+	)
+	await db.execute(
+		"""
+		CREATE TRIGGER journal_text_to_json_trigger
+		BEFORE INSERT ON journal
+		FOR EACH ROW EXECUTE FUNCTION journal_text_to_json();
 		"""
 	)
 
@@ -122,8 +114,16 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 			disabled BOOLEAN NOT NULL DEFAULT FALSE,
 			topic VARCHAR(255) NOT NULL,
 			alarm_name VARCHAR(255) NOT NULL,
-			delivery_method VARCHAR(255) NOT NULL
+			delivery_method VARCHAR(255) NOT NULL,
+			webhook_url VARCHAR(512)
 		);
+		"""
+	)
+
+	# Migrate existing deployments that pre-date the webhook_url column
+	await db.execute(
+		"""
+		ALTER TABLE alarm ADD COLUMN IF NOT EXISTS webhook_url VARCHAR(512);
 		"""
 	)
 

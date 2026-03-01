@@ -22,6 +22,9 @@ restrictedpython = "^7.4"
 testcontainers = {extras = ["postgres"], version = "^4.10.0"}
 types-pyyaml = "^6.0.12.20250516"
 websockets = "^15.0.1"
+aiosqlite = "^0.21.0"
+argon2-cffi = "^25.1.0"
+zeroconf = "^0.148.0"
 
 [tool.poetry.scripts]
 start = "src.server:main"
@@ -52,11 +55,12 @@ indent = "\t"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["test"]
 python_files = ["test_*.py"]
 pythonpath = ["."]
 log_cli = true
-# log_cli_level = "INFO"
+log_cli_level = "WARNING"
+log_level = "WARNING"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
 log_cli_date_format = "%Y-%m-%d %H:%M:%S"
 

@@ -4,10 +4,10 @@ import time
 from collections.abc import Awaitable, Callable
 from test.load_cell_example_data import LoadCellPublisher
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from quart.testing import QuartClient
-from websockets.asyncio.client import connect
 
 from src.alarm import CompiledAlarm
 
@@ -26,6 +26,7 @@ mutation CreateOrUpdateAlarm($input: AlarmInput!) {
     alarmName
     deliveryMethod
     disabled
+    webhookUrl
   }
 }
 """
@@ -111,10 +112,14 @@ async def test_get_alarms(
 	test_client: QuartClient,
 	login_mutation: str,
 	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
+	new_alarm_input: dict[str, Any],
 ) -> None:
 	# Authenticate
 	login_resp = await execute_graphql(login_mutation)
 	token = login_resp["data"]["login"]["accessToken"]
+
+	# Create an alarm first so the list is non-empty
+	await execute_graphql(ALARM_MUTATION, token=token, variables={"input": new_alarm_input})
 
 	# Retrieve the list of alarms
 	resp = await execute_graphql(
@@ -200,19 +205,23 @@ async def test_alarm_trigger(
 	)
 	alarm_id = resp["data"]["alarm"]["id"]
 	received: dict[str, Any] = {}
+	event = asyncio.Event()
 
 	def _receiver(sender: Any, **kwargs: Any) -> None:
 		received.update(kwargs)
+		event.set()
 
 	from src.signals import alarm_triggered
 
-	alarm_triggered = alarm_triggered
 	alarm_triggered.connect(_receiver)
 
 	await LoadCellPublisher().publish_n_messages(1)
-	await asyncio.sleep(0.1)
 
-	alarm_triggered.disconnect(_receiver)
+	try:
+		await asyncio.wait_for(event.wait(), timeout=2.0)
+	finally:
+		alarm_triggered.disconnect(_receiver)
+
 	_logger.info("Received: %s", received)
 	assert "alarm" in received
 	assert "message_data" in received
@@ -285,13 +294,13 @@ async def test_alarm_latency(
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
-async def test_alarm_trigger_websocket(
+async def test_alarm_trigger_at_boundary(
 	test_client: QuartClient,
 	login_mutation: str,
 	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
 	new_alarm_load_cell: dict[str, Any],
 ) -> None:
-	# override condition
+	"""Alarm fires when the message value is exactly at the condition threshold (>= 500)."""
 	new_alarm_load_cell["condition"] = "message['measurement']['weight']['value'] >= 500"
 	login_resp = await execute_graphql(login_mutation)
 	token = login_resp["data"]["login"]["accessToken"]
@@ -303,19 +312,23 @@ async def test_alarm_trigger_websocket(
 	)
 	alarm_id = resp["data"]["alarm"]["id"]
 	received: dict[str, Any] = {}
+	event = asyncio.Event()
 
 	def _receiver(sender: Any, **kwargs: Any) -> None:
 		received.update(kwargs)
+		event.set()
 
 	from src.signals import alarm_triggered
 
-	alarm_triggered = alarm_triggered
 	alarm_triggered.connect(_receiver)
 
-	await LoadCellPublisher().publish_n_messages(1, 500)
-	await asyncio.sleep(0.1)
+	await LoadCellPublisher().publish_n_messages(1, payload_weight=500.0)
 
-	alarm_triggered.disconnect(_receiver)
+	try:
+		await asyncio.wait_for(event.wait(), timeout=2.0)
+	finally:
+		alarm_triggered.disconnect(_receiver)
+
 	_logger.info("Received: %s", received)
 	assert "alarm" in received
 	assert "message_data" in received
@@ -331,11 +344,56 @@ async def test_alarm_trigger_websocket(
 	assert "measurement" in msg and "weight" in msg["measurement"]
 	weight = msg["measurement"]["weight"]["value"]
 	assert isinstance(weight, float)
-	assert weight == 500
+	assert weight == 500.0
 
-	# Send alarm to websocket
-	alarm_str = f"Load cell overload with weight: {weight}"
-	async with connect("ws://localhost:8765") as websocket:
-		await websocket.send(alarm_str)
-		message = await websocket.recv()
-		assert message == alarm_str
+
+@pytest.mark.asyncio  # type: ignore[misc]
+async def test_alarm_webhook_delivery(
+	test_client: QuartClient,
+	login_mutation: str,
+	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
+	new_alarm_load_cell: dict[str, Any],
+) -> None:
+	"""When webhook_url is set, triggering an alarm POSTs to that URL with the alarm payload."""
+	webhook_url = "http://webhook.example.com/receive"
+
+	login_resp = await execute_graphql(login_mutation)
+	token = login_resp["data"]["login"]["accessToken"]
+
+	new_alarm_load_cell["webhookUrl"] = webhook_url
+	resp = await execute_graphql(
+		ALARM_MUTATION, token=token, variables={"input": new_alarm_load_cell}
+	)
+	assert resp["data"]["alarm"]["webhookUrl"] == webhook_url
+
+	event = asyncio.Event()
+
+	def _receiver(sender: Any, **kwargs: Any) -> None:
+		event.set()
+
+	from src.signals import alarm_triggered
+
+	alarm_triggered.connect(_receiver)
+
+	mock_post = AsyncMock()
+	mock_instance = AsyncMock()
+	mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+	mock_instance.__aexit__ = AsyncMock(return_value=False)
+	mock_instance.post = mock_post
+
+	with patch("src.alarm.httpx.AsyncClient", return_value=mock_instance):
+		await LoadCellPublisher().publish_n_messages(1)
+		try:
+			await asyncio.wait_for(event.wait(), timeout=2.0)
+			# Signal fires before the async POST; yield briefly so the POST completes
+			await asyncio.sleep(0.1)
+		finally:
+			alarm_triggered.disconnect(_receiver)
+
+	mock_post.assert_called_once()
+	url_called = mock_post.call_args.args[0]
+	assert url_called == webhook_url
+	json_payload = mock_post.call_args.kwargs["json"]
+	assert json_payload["alarm_name"] == new_alarm_load_cell["alarmName"]
+	assert json_payload["topic"] == new_alarm_load_cell["topic"]
+	assert "message_data" in json_payload
