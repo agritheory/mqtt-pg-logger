@@ -37,8 +37,8 @@ jobs:
           LOG_ALL_TOPICS: "false"
           ALLOW_ALL_TOPICS: "false"
           TESTCONTAINERS_RYUK_DISABLED: "true"
-          FERNET_KEY: ${{ secrets.FERNET_KEY }}
-          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
-          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
-          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          FERNET_KEY: ${{ secrets.FERNET_KEY || 'D7jNgKGahOrZtQVd9reaT53B4SAz-gLH2ZJtRStpCsY=' }}
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL || 'admin@agritheory.dev' }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD || 'ohch4GeiSie' }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY || '59eggsXI2uU2eaWmmOcr_zMKfhE4rW-h0avo0IKNJS4' }}
         run: poetry run pytest
