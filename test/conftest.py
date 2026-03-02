@@ -4,9 +4,7 @@ import os
 if os.getenv("DEVCONTAINER"):
 	os.environ["TESTCONTAINERS_HOST_OVERRIDE"] = "host.docker.internal"
 else:
-	# Running outside devcontainer - use localhost
 	os.environ["TESTCONTAINERS_HOST_OVERRIDE"] = "localhost"
-	# Ensure testcontainers can find docker
 	os.environ["DOCKER_HOST"] = "unix:///var/run/docker.sock"
 
 import json
@@ -14,15 +12,18 @@ import warnings
 from collections.abc import AsyncGenerator, Generator
 from typing import Any, cast
 
+import asyncpg
 import pytest
 import uvloop
-from databases import Database
-from quart.testing import QuartClient, TestApp
+from cryptography.fernet import Fernet
+from quart.testing import QuartClient
+from quart.testing import TestApp as QuartTestApp
 from testcontainers.core.container import DockerContainer
-from testcontainers.core.waiting_utils import wait_for_logs
+from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 from testcontainers.postgres import PostgresContainer
 from websockets.asyncio.server import Server, ServerConnection, serve
 
+from src.create_schema import create_admin_user
 from src.server import create_app
 
 
@@ -44,15 +45,14 @@ def artemis_container() -> Generator[dict[str, Any], None, None]:
 	container = DockerContainer("apache/activemq-artemis:latest-alpine")
 	container.with_env("EXTRA_ARGS", "--http-host 0.0.0.0 --relax-jolokia")
 	container.with_exposed_ports(1883)
+	container.waiting_for(LogMessageWaitStrategy("AMQ221007").with_startup_timeout(120))
 	container.start()
-	wait_for_logs(container, "AMQ221007", timeout=120)
 
 	host = container.get_container_host_ip()
 	port = int(container.get_exposed_port(1883))
 
 	os.environ["MQTT_BROKER_HOST"] = host
 	os.environ["MQTT_BROKER_PORT"] = str(port)
-	# Default credentials for the apache/activemq-artemis image
 	os.environ.setdefault("MQTT_USER", "artemis")
 	os.environ.setdefault("MQTT_PASSWORD", "artemis")
 
@@ -62,18 +62,29 @@ def artemis_container() -> Generator[dict[str, Any], None, None]:
 
 
 @pytest.fixture  # type: ignore[misc]
-async def app(db_url: str, artemis_container: dict[str, Any]) -> AsyncGenerator[TestApp, None]:
-	app = create_app(db_url=db_url, force_rollback="True")
-	ctx = app.app_context()
-	await ctx.push()
-
-	# await app.db.connect()
-	async with app.test_app() as test_app:
+async def app(
+	db_url: str, artemis_container: dict[str, Any]
+) -> AsyncGenerator[QuartTestApp, None]:
+	_app = create_app(db_url=db_url)
+	async with _app.test_app() as test_app:
+		# before_serving has now run: schema exists, pool is live.
+		# Truncate all data tables so every test starts with a clean slate.
+		# CASCADE handles FK ordering (alarm → webhook → user).
+		pool: asyncpg.Pool = test_app.app.db
+		await pool.execute('TRUNCATE alarm, webhook, journal, topic, "user" RESTART IDENTITY CASCADE')
+		# Re-seed the admin user that all tests authenticate as.
+		fernet = Fernet(os.environ["FERNET_KEY"])
+		await create_admin_user(
+			pool,
+			fernet,
+			os.environ["ADMIN_EMAIL"],
+			os.environ["ADMIN_PASSWORD"],
+		)
 		yield test_app
 
 
 @pytest.fixture  # type: ignore[misc]
-def test_client(app: TestApp) -> QuartClient:
+def test_client(app: QuartTestApp) -> QuartClient:
 	return app.test_client()
 
 
@@ -83,7 +94,6 @@ async def db_url() -> AsyncGenerator[str, None]:
 	Start a TimescaleDB container (built on Postgres), create the timescaledb extension,
 	and yield the connection URL.
 	"""
-
 	image = "timescale/timescaledb:latest-pg16"
 
 	container = PostgresContainer(
@@ -93,18 +103,19 @@ async def db_url() -> AsyncGenerator[str, None]:
 		password="postgres",
 	)
 
-	# Configure container for different environments
 	if not os.getenv("DEVCONTAINER"):
-		# Outside devcontainer, bind to a specific port to avoid conflicts
-		container.with_bind_ports(5432, None)  # Let testcontainers pick available port
+		container.with_bind_ports(5432, None)
 	container.start()
 
-	# _logger.info(f"Started TimescaleDB container: {container.get_connection_url()}")
-	db = Database(container.get_connection_url())
-	await db.connect()
-	await db.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
-	await db.disconnect()
-	yield container.get_connection_url()
+	conn_url = container.get_connection_url()
+	# asyncpg uses postgresql://, psycopg2 (used by testcontainers) uses postgresql+psycopg2://
+	asyncpg_url = conn_url.replace("postgresql+psycopg2://", "postgresql://")
+
+	pool = await asyncpg.create_pool(asyncpg_url)
+	await pool.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
+	await pool.close()
+
+	yield asyncpg_url
 
 	container.stop()
 
@@ -178,7 +189,7 @@ def execute_graphql(test_client: QuartClient) -> Any:
 	against the Quart test client and parsing the JSON result.
 	"""
 
-	async def _exec(
+	async def run_graphql(
 		query: str,
 		*,
 		token: str | None = None,
@@ -195,7 +206,7 @@ def execute_graphql(test_client: QuartClient) -> Any:
 		resp = await test_client.post("/graphql/", json=body, headers=headers)
 		return cast(dict[str, Any], json.loads(await resp.get_data()))
 
-	return _exec
+	return run_graphql
 
 
 async def echo(websocket: ServerConnection) -> None:

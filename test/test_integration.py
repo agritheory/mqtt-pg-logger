@@ -9,7 +9,8 @@ from typing import Any
 import aiomqtt
 import pytest
 from environs import Env
-from quart.testing import QuartClient, TestApp
+from quart.testing import QuartClient
+from quart.testing import TestApp as QuartTestApp
 
 env = Env()
 
@@ -36,7 +37,7 @@ async def mqtt_client() -> AsyncGenerator[aiomqtt.Client, None]:
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_mqtt_message_logging(
-	app: TestApp,
+	app: QuartTestApp,
 	test_client: QuartClient,
 	mqtt_client: aiomqtt.Client,
 	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
@@ -64,14 +65,14 @@ async def test_mqtt_message_logging(
 	# Wait for the background task to process and store the message.
 	await asyncio.sleep(2)
 
-	record = await app.app.db.fetch_one(
-		query="""
-			SELECT * FROM journal
-			WHERE topic = :topic
-			ORDER BY creation DESC
-			LIMIT 1
+	record = await app.app.db.fetchrow(
+		"""
+		SELECT * FROM journal
+		WHERE topic = $1
+		ORDER BY creation DESC
+		LIMIT 1
 		""",
-		values={"topic": test_topic},
+		test_topic,
 	)
 
 	assert record is not None, "No matching record found in database"

@@ -3,7 +3,8 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
-from quart.testing import QuartClient, TestApp
+from quart.testing import QuartClient
+from quart.testing import TestApp as QuartTestApp
 
 GET_JOURNAL_ENTRIES = """
 query GetJournalEntries(
@@ -27,40 +28,34 @@ query GetJournalEntries(
 }
 """
 
-_INSERT_JOURNAL = """
+INSERT_JOURNAL = """
     INSERT INTO journal (topic, text, entrypoint, priority)
-    VALUES (:topic, :text, :entrypoint, :priority)
+    VALUES ($1, $2, $3, $4)
     RETURNING id, creation
 """
 
-_INSERT_JOURNAL_WITH_TIME = """
+INSERT_JOURNAL_WITH_TIME = """
     INSERT INTO journal (topic, text, entrypoint, priority, creation)
-    VALUES (:topic, :text, :entrypoint, :priority, :creation)
+    VALUES ($1, $2, $3, $4, $5)
     RETURNING id, creation
 """
 
 
-async def _insert(db: Any, topic: str, text: str) -> dict[str, Any]:
-	row = await db.fetch_one(
-		query=_INSERT_JOURNAL,
-		values={"topic": topic, "text": text, "entrypoint": "test", "priority": 0},
-	)
+async def insert_journal(db: Any, topic: str, text: str) -> dict[str, Any]:
+	row = await db.fetchrow(INSERT_JOURNAL, topic, text, "test", 0)
 	return dict(row)
 
 
-async def _insert_at(
+async def insert_journal_at(
 	db: Any, topic: str, text: str, creation: datetime.datetime
 ) -> dict[str, Any]:
-	row = await db.fetch_one(
-		query=_INSERT_JOURNAL_WITH_TIME,
-		values={"topic": topic, "text": text, "entrypoint": "test", "priority": 0, "creation": creation},
-	)
+	row = await db.fetchrow(INSERT_JOURNAL_WITH_TIME, topic, text, "test", 0, creation)
 	return dict(row)
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_journal_empty(
-	app: TestApp,
+	app: QuartTestApp,
 	test_client: QuartClient,
 	login_mutation: str,
 	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
@@ -76,15 +71,15 @@ async def test_journal_empty(
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_journal_returns_entries(
-	app: TestApp,
+	app: QuartTestApp,
 	test_client: QuartClient,
 	login_mutation: str,
 	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
 ) -> None:
 	"""Entries inserted into the journal table are returned by getJournalEntries."""
 	db = app.app.db
-	await _insert(db, "sensors/temperature", '{"temp": 22.5}')
-	await _insert(db, "sensors/temperature", '{"temp": 23.0}')
+	await insert_journal(db, "sensors/temperature", '{"temp": 22.5}')
+	await insert_journal(db, "sensors/temperature", '{"temp": 23.0}')
 
 	login_resp = await execute_graphql(login_mutation)
 	token = login_resp["data"]["login"]["accessToken"]
@@ -99,16 +94,16 @@ async def test_journal_returns_entries(
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_journal_filter_by_topic(
-	app: TestApp,
+	app: QuartTestApp,
 	test_client: QuartClient,
 	login_mutation: str,
 	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
 ) -> None:
 	"""topic filter returns only entries whose topic matches exactly."""
 	db = app.app.db
-	await _insert(db, "sensors/temperature", '{"temp": 22.5}')
-	await _insert(db, "sensors/humidity", '{"humidity": 60}')
-	await _insert(db, "sensors/temperature", '{"temp": 23.0}')
+	await insert_journal(db, "sensors/temperature", '{"temp": 22.5}')
+	await insert_journal(db, "sensors/humidity", '{"humidity": 60}')
+	await insert_journal(db, "sensors/temperature", '{"temp": 23.0}')
 
 	login_resp = await execute_graphql(login_mutation)
 	token = login_resp["data"]["login"]["accessToken"]
@@ -123,14 +118,14 @@ async def test_journal_filter_by_topic(
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_journal_filter_by_topic_no_match(
-	app: TestApp,
+	app: QuartTestApp,
 	test_client: QuartClient,
 	login_mutation: str,
 	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
 ) -> None:
 	"""topic filter returns empty list when no entries match."""
 	db = app.app.db
-	await _insert(db, "sensors/temperature", '{"temp": 22.5}')
+	await insert_journal(db, "sensors/temperature", '{"temp": 22.5}')
 
 	login_resp = await execute_graphql(login_mutation)
 	token = login_resp["data"]["login"]["accessToken"]
@@ -143,7 +138,7 @@ async def test_journal_filter_by_topic_no_match(
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_journal_limit(
-	app: TestApp,
+	app: QuartTestApp,
 	test_client: QuartClient,
 	login_mutation: str,
 	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
@@ -151,7 +146,7 @@ async def test_journal_limit(
 	"""limit parameter caps the number of entries returned."""
 	db = app.app.db
 	for i in range(5):
-		await _insert(db, "sensors/pressure", f'{{"pressure": {100 + i}}}')
+		await insert_journal(db, "sensors/pressure", f'{{"pressure": {100 + i}}}')
 
 	login_resp = await execute_graphql(login_mutation)
 	token = login_resp["data"]["login"]["accessToken"]
@@ -162,7 +157,7 @@ async def test_journal_limit(
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_journal_filter_start_time(
-	app: TestApp,
+	app: QuartTestApp,
 	test_client: QuartClient,
 	login_mutation: str,
 	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
@@ -173,8 +168,8 @@ async def test_journal_filter_start_time(
 	two_hours_ago = now - datetime.timedelta(hours=2)
 	cutoff = now - datetime.timedelta(hours=1)
 
-	await _insert_at(db, "sensors/flow", '{"flow": 1.0}', two_hours_ago)
-	await _insert_at(db, "sensors/flow", '{"flow": 2.0}', now)
+	await insert_journal_at(db, "sensors/flow", '{"flow": 1.0}', two_hours_ago)
+	await insert_journal_at(db, "sensors/flow", '{"flow": 2.0}', now)
 
 	login_resp = await execute_graphql(login_mutation)
 	token = login_resp["data"]["login"]["accessToken"]
@@ -191,7 +186,7 @@ async def test_journal_filter_start_time(
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_journal_filter_end_time(
-	app: TestApp,
+	app: QuartTestApp,
 	test_client: QuartClient,
 	login_mutation: str,
 	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
@@ -202,8 +197,8 @@ async def test_journal_filter_end_time(
 	two_hours_ago = now - datetime.timedelta(hours=2)
 	cutoff = now - datetime.timedelta(hours=1)
 
-	await _insert_at(db, "sensors/flow", '{"flow": 1.0}', two_hours_ago)
-	await _insert_at(db, "sensors/flow", '{"flow": 2.0}', now)
+	await insert_journal_at(db, "sensors/flow", '{"flow": 1.0}', two_hours_ago)
+	await insert_journal_at(db, "sensors/flow", '{"flow": 2.0}', now)
 
 	login_resp = await execute_graphql(login_mutation)
 	token = login_resp["data"]["login"]["accessToken"]
@@ -220,7 +215,7 @@ async def test_journal_filter_end_time(
 
 @pytest.mark.asyncio  # type: ignore[misc]
 async def test_journal_filter_time_range(
-	app: TestApp,
+	app: QuartTestApp,
 	test_client: QuartClient,
 	login_mutation: str,
 	execute_graphql: Callable[..., Awaitable[dict[str, Any]]],
@@ -229,10 +224,10 @@ async def test_journal_filter_time_range(
 	db = app.app.db
 	now = datetime.datetime.now(datetime.UTC)
 
-	await _insert_at(db, "sensors/flow", '{"flow": 1.0}', now - datetime.timedelta(hours=3))
-	await _insert_at(db, "sensors/flow", '{"flow": 2.0}', now - datetime.timedelta(hours=2))
-	await _insert_at(db, "sensors/flow", '{"flow": 3.0}', now - datetime.timedelta(hours=1))
-	await _insert_at(db, "sensors/flow", '{"flow": 4.0}', now)
+	await insert_journal_at(db, "sensors/flow", '{"flow": 1.0}', now - datetime.timedelta(hours=3))
+	await insert_journal_at(db, "sensors/flow", '{"flow": 2.0}', now - datetime.timedelta(hours=2))
+	await insert_journal_at(db, "sensors/flow", '{"flow": 3.0}', now - datetime.timedelta(hours=1))
+	await insert_journal_at(db, "sensors/flow", '{"flow": 4.0}', now)
 
 	login_resp = await execute_graphql(login_mutation)
 	token = login_resp["data"]["login"]["accessToken"]
@@ -261,4 +256,4 @@ async def test_journal_requires_auth(
 	"""getJournalEntries requires a valid token."""
 	resp = await execute_graphql(GET_JOURNAL_ENTRIES)
 	assert "errors" in resp
-	assert "Authorization required" in resp["errors"][0]
+	assert "Authorization required" in resp["errors"][0]["message"]

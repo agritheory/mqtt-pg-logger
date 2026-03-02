@@ -51,7 +51,7 @@ class PIDControllerStore:
 		error = setpoint - process_value
 
 		# Get the previous state or create a new one
-		state = self._get_state(pid_id)
+		state = self.get_pid_state(pid_id)
 
 		# Calculate dt (time since last calculation)
 		dt = current_time - state.last_time if state.last_time > 0 else 0.1
@@ -84,19 +84,19 @@ class PIDControllerStore:
 		state.output = output
 
 		# Save state
-		self._save_state(pid_id, state)
+		self.save_pid_state(pid_id, state)
 
 		return output
 
 	def reset(self, pid_id: str) -> None:
 		"""Reset a PID controller to initial values."""
-		self._save_state(pid_id, PIDState())
+		self.save_pid_state(pid_id, PIDState())
 
 	def get_last_output(self, pid_id: str) -> float:
 		"""Get the last calculated output for a PID controller."""
-		return self._get_state(pid_id).output
+		return self.get_pid_state(pid_id).output
 
-	def _get_state(self, pid_id: str) -> PIDState:
+	def get_pid_state(self, pid_id: str) -> PIDState:
 		"""Get the state for a PID controller, loading from disk if needed."""
 		# Create a namespace from user ID if not present
 		namespace, _, controller_id = pid_id.partition("/")
@@ -119,7 +119,7 @@ class PIDControllerStore:
 			# No entry exists
 			return PIDState()
 
-	def _save_state(self, pid_id: str, state: PIDState) -> None:
+	def save_pid_state(self, pid_id: str, state: PIDState) -> None:
 		"""Save the state for a PID controller to disk."""
 		# Create a namespace from user ID if not present
 		namespace, _, controller_id = pid_id.partition("/")

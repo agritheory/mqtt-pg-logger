@@ -1,13 +1,19 @@
 import logging
+from typing import Union
 
+import asyncpg
 from cryptography.fernet import Fernet
-from databases import Database
 
 logging.basicConfig(level=logging.INFO)
-_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
+
+# Type alias accepted everywhere a DB handle is needed.
+# asyncpg.Pool is used in production; asyncpg.Connection is accepted for callers
+# that manage their own connection (e.g. within an explicit transaction).
+DBHandle = Union[asyncpg.Pool, asyncpg.Connection]
 
 
-async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
+async def create_schema(db: DBHandle) -> None:
 	# Create tables
 	await db.execute(
 		"""
@@ -57,12 +63,11 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 		"""
 	)
 
-	# Create indexes - split into separate statements
+	# Create indexes
 	indexes = [
 		'CREATE INDEX IF NOT EXISTS idx_user_username ON "user"(username)',
 		"CREATE INDEX IF NOT EXISTS idx_topic_topic ON topic(topic)",
 	]
-
 	for index in indexes:
 		await db.execute(index)
 
@@ -102,6 +107,24 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 		"""
 	)
 
+	# Webhook table (Standard Webhooks compliant)
+	await db.execute(
+		"""
+		CREATE TABLE IF NOT EXISTS webhook (
+			id SERIAL PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			url VARCHAR(512) NOT NULL,
+			signing_secret VARCHAR(255) NOT NULL,
+			disabled BOOLEAN NOT NULL DEFAULT FALSE,
+			creation TIMESTAMP NOT NULL DEFAULT NOW(),
+			modified TIMESTAMP NOT NULL DEFAULT NOW(),
+			owner_id INTEGER NOT NULL REFERENCES "user"(id),
+			modified_by_id INTEGER NOT NULL REFERENCES "user"(id)
+		);
+		"""
+	)
+	await db.execute("CREATE INDEX IF NOT EXISTS idx_webhook_disabled ON webhook(disabled)")
+
 	await db.execute(
 		"""
 		CREATE TABLE IF NOT EXISTS alarm (
@@ -115,15 +138,9 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 			topic VARCHAR(255) NOT NULL,
 			alarm_name VARCHAR(255) NOT NULL,
 			delivery_method VARCHAR(255) NOT NULL,
-			webhook_url VARCHAR(512)
+			webhook_id INTEGER REFERENCES webhook(id),
+			forward_topic VARCHAR(255)
 		);
-		"""
-	)
-
-	# Migrate existing deployments that pre-date the webhook_url column
-	await db.execute(
-		"""
-		ALTER TABLE alarm ADD COLUMN IF NOT EXISTS webhook_url VARCHAR(512);
 		"""
 	)
 
@@ -151,8 +168,6 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 	"""
 	)
 
-	# After creating the journal table and converting to hypertable,
-	# enable compression and set configuration
 	await db.execute(
 		"""
 		ALTER TABLE journal SET (
@@ -163,7 +178,6 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 		"""
 	)
 
-	# Add compression policy
 	await db.execute(
 		"""
 		DO $$
@@ -176,7 +190,6 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 		"""
 	)
 
-	# Add retention policy
 	await db.execute(
 		"""
 		DO $$
@@ -191,54 +204,45 @@ async def create_schema(db: Database, fernet: Fernet | None = None) -> None:
 
 
 async def create_admin_user(
-	db: Database, fernet: Fernet, admin_email: str, admin_password: str | None = None
+	db: DBHandle, fernet: Fernet, admin_email: str, admin_password: str | None = None
 ) -> None:
 	"""Create admin user if it doesn't exist"""
-	query = 'SELECT id FROM "user" WHERE username = :username'
-	exists = await db.fetch_one(query=query, values={"username": admin_email})
+	exists = await db.fetchrow('SELECT id FROM "user" WHERE username = $1', admin_email)
 
 	if not exists:
-		# The encrypted password is already bytes, don't decode it
 		encrypted_password = fernet.encrypt(admin_password.encode()) if admin_password else None
-		query = """
-		INSERT INTO "user" (username, password_hash, disabled, owner, modified_by)
-		VALUES (:username, :password, false, :owner, :modified_by)
-		"""
 		await db.execute(
-			query=query,
-			values={
-				"username": admin_email,
-				"password": encrypted_password,
-				"owner": admin_email,
-				"modified_by": admin_email,
-			},
+			"""
+			INSERT INTO "user" (username, password_hash, disabled, owner, modified_by)
+			VALUES ($1, $2, false, $3, $4)
+			""",
+			admin_email,
+			encrypted_password,
+			admin_email,
+			admin_email,
 		)
-		_logger.info(f"{admin_email} user created successfully")
+		logger.info(f"{admin_email} user created successfully")
 
 
-def TimescaleDB(
-	db_user: str,
-	db_password: str,
-	db_host: str,
-	db_port: str,
-	db_name: str,
-	force_rollback: bool = False,
-) -> Database:
-	db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-	return Database(db_url, force_rollback=force_rollback)
+async def create_pool(db_url: str) -> asyncpg.Pool:
+	return await asyncpg.create_pool(db_url)
 
 
 async def initialize_db(
-	db: Database, fernet_key: str, admin_email: str, admin_password: str, mqtt_user: str
+	pool: asyncpg.Pool,
+	fernet_key: str,
+	admin_email: str,
+	admin_password: str,
+	mqtt_user: str,
 ) -> None:
 	"""Initialize database with schema and admin user"""
-	async with db.transaction():
-		await create_schema(db)
+	async with pool.acquire() as conn:
+		async with conn.transaction():
+			await create_schema(conn)
 
-		if all([fernet_key, admin_email, admin_password]):
-			fernet = Fernet(fernet_key)
-			await create_admin_user(db, fernet, admin_email, admin_password)
+			if all([fernet_key, admin_email, admin_password]):
+				fernet = Fernet(fernet_key)
+				await create_admin_user(conn, fernet, admin_email, admin_password)
 
-		# Create MQTT service account
-		if fernet_key and mqtt_user:
-			await create_admin_user(db, fernet, mqtt_user, None)
+			if fernet_key and mqtt_user:
+				await create_admin_user(conn, fernet, mqtt_user, None)

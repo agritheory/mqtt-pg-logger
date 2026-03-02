@@ -1,20 +1,32 @@
 import json
 import logging
 from collections import defaultdict
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from types import CodeType
 from typing import Any
 
 import aiomqtt
-import httpx
 from quart import current_app
 from RestrictedPython import compile_restricted
 from RestrictedPython.Guards import safe_builtins, safe_globals
 
 from src.pid import PIDControllerStore
 from src.signals import alarm_refresh_signal, alarm_triggered
+from src.webhook_delivery import ALARM_TRIGGERED_TYPE, deliver_standard_webhook
 
-_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class WebhookTarget:
+	"""Target for Standard Webhooks delivery (from webhook table)."""
+
+	url: str
+	signing_secret: str
+
+
+PublishCallback = Callable[[str, str], Coroutine[Any, Any, None]]
 
 
 @dataclass
@@ -27,14 +39,21 @@ class CompiledAlarm:
 	owner: str
 	disabled: bool
 	byte_code: CodeType  # Compiled Python code object
-	webhook_url: str | None = None
+	webhook_target: WebhookTarget | None = None
+	forward_topic: str | None = None
 
 
 class Alarm:
-	def __init__(self, cache: dict | None = None, pid_store_path: str = "pid.shelve"):
+	def __init__(
+		self,
+		cache: dict | None = None,
+		pid_store_path: str = "pid.shelve",
+		publish_callback: PublishCallback | None = None,
+	):
 		self.cache = current_app.cache if cache is None else cache
 		self.topic_mapping: dict[str, set[int]] = defaultdict(set)
 		self.pid_store = PIDControllerStore(pid_store_path)
+		self.publish_callback = publish_callback
 
 		# Set up safe globals for RestrictedPython
 		self.safe_globals = dict(safe_globals)
@@ -72,7 +91,7 @@ class Alarm:
 				pid_id, setpoint, process_value, kp, ki, kd, min_output, max_output
 			)
 		except Exception as e:
-			_logger.error(f"Error in PID compute for {pid_id}: {str(e)}")
+			logger.error(f"Error in PID compute for {pid_id}: {str(e)}")
 			return 0.0
 
 	def pid_reset(self, pid_id: str) -> None:
@@ -80,46 +99,57 @@ class Alarm:
 		try:
 			self.pid_store.reset(pid_id)
 		except Exception as e:
-			_logger.error(f"Error in PID reset for {pid_id}: {str(e)}")
+			logger.error(f"Error in PID reset for {pid_id}: {str(e)}")
 
 	def pid_last_output(self, pid_id: str) -> float:
 		"""Safe wrapper to get the last PID output."""
 		try:
 			return self.pid_store.get_last_output(pid_id)
 		except Exception as e:
-			_logger.error(f"Error getting last PID output for {pid_id}: {str(e)}")
+			logger.error(f"Error getting last PID output for {pid_id}: {str(e)}")
 			return 0.0
 
 	async def load_alarms(self, sender: Any) -> None:
 		query = """
-			SELECT id, condition, owner, topic, alarm_name, delivery_method, disabled, webhook_url
-			FROM alarm
-			WHERE disabled = FALSE
+			SELECT a.id, a.condition, a.owner, a.topic, a.alarm_name, a.delivery_method, a.disabled,
+			       a.forward_topic, w.url AS webhook_table_url, w.signing_secret
+			FROM alarm a
+			LEFT JOIN webhook w ON a.webhook_id = w.id AND w.disabled = FALSE
+			WHERE a.disabled = FALSE
 		"""
-		rows = await current_app.db.fetch_all(query=query)
+		rows = await current_app.db.fetch(query)
 		self.topic_mapping.clear()
 		current_ids = set()
 
 		for row in rows:
-			alarm_id = int(row["id"])
+			r = dict(row)
+			alarm_id = int(r["id"])
 			current_ids.add(alarm_id)
 
-			byte_code = compile_restricted(row["condition"], "<string>", "eval")
+			byte_code = compile_restricted(r["condition"], "<string>", "eval")
+
+			webhook_target: WebhookTarget | None = None
+			if r.get("webhook_table_url") and r.get("signing_secret"):
+				webhook_target = WebhookTarget(
+					url=r["webhook_table_url"],
+					signing_secret=r["signing_secret"],
+				)
 
 			cached_alarm = CompiledAlarm(
 				id=alarm_id,
-				condition=row["condition"],
-				topic=row["topic"],
-				alarm_name=row["alarm_name"],
-				delivery_method=row["delivery_method"],
-				owner=row["owner"],
-				disabled=row["disabled"],
+				condition=r["condition"],
+				topic=r["topic"],
+				alarm_name=r["alarm_name"],
+				delivery_method=r["delivery_method"],
+				owner=r["owner"],
+				disabled=r["disabled"],
 				byte_code=byte_code,
-				webhook_url=row["webhook_url"],
+				webhook_target=webhook_target,
+				forward_topic=r.get("forward_topic"),
 			)
 
 			self.cache[alarm_id] = cached_alarm
-			self.topic_mapping[row["topic"]].add(alarm_id)
+			self.topic_mapping[r["topic"]].add(alarm_id)
 
 		# Remove stale entries (compare int keys consistently)
 		stale_keys = set(self.cache.keys()) - current_ids
@@ -127,23 +157,22 @@ class Alarm:
 			del self.cache[key]
 
 	async def handle_message(self, message: aiomqtt.Message) -> None:
-		_logger.info(f"Handling message: {message.topic}")
+		logger.info(f"Handling message: {message.topic}")
 
 		message_data: str | dict[str, Any] = message.payload.decode()
 		matching_alarm_ids = self.topic_mapping.get(str(message.topic), set())
-		_logger.info(f"possible alarm ids: {self.topic_mapping.keys()}")
-		_logger.info(f"Matching alarm ids: {matching_alarm_ids}")
-		# _logger.info(f"Message data: {message_data}")
+		logger.info(f"possible alarm ids: {self.topic_mapping.keys()}")
+		logger.info(f"Matching alarm ids: {matching_alarm_ids}")
 
 		if not matching_alarm_ids:
-			_logger.info(f"No matching alarms for topic: {message.topic}")
+			logger.info(f"No matching alarms for topic: {message.topic}")
 			return
 
 		for alarm_id in matching_alarm_ids:
 			try:
 				alarm = self.cache.get(int(alarm_id))
 				if not alarm:
-					_logger.info(f"Alarm {alarm_id} not found in cache")
+					logger.info(f"Alarm {alarm_id} not found in cache")
 					continue
 
 				# Create restricted environment with message data
@@ -153,39 +182,42 @@ class Alarm:
 
 				# Evaluate the pre-compiled condition
 				result = eval(alarm.byte_code, self.safe_globals, locals_dict)
-				# filter/forward code here
 
 				if result:
 					await self.trigger_alarm(alarm, message_data)
 
 			except Exception as e:
-				_logger.error(f"Error processing alarm {alarm_id}: {str(e)}")
+				logger.error(f"Error processing alarm {alarm_id}: {str(e)}")
 				continue
 
 	async def trigger_alarm(self, alarm: CompiledAlarm, message_data: str | dict[str, Any]) -> None:
-		_logger.info(f"ALARM TRIGGERED: {alarm.alarm_name} on topic {alarm.topic}")
+		logger.info(f"ALARM TRIGGERED: {alarm.alarm_name} on topic {alarm.topic}")
 		self.alarm_triggered.send(self, alarm=alarm, message_data=message_data)
 
-		if alarm.webhook_url:
-			try:
-				async with httpx.AsyncClient() as client:
-					await client.post(
-						alarm.webhook_url,
-						json={
-							"alarm_name": alarm.alarm_name,
-							"topic": alarm.topic,
-							"condition": alarm.condition,
-							"message_data": message_data,
-						},
-						timeout=5.0,
-					)
-				_logger.info(f"Webhook delivered for alarm '{alarm.alarm_name}' to {alarm.webhook_url}")
-			except Exception as e:
-				_logger.error(
-					f"Webhook delivery failed for alarm '{alarm.alarm_name}' to {alarm.webhook_url}: {e}"
+		if alarm.delivery_method == "mqtt":
+			if self.publish_callback and alarm.forward_topic:
+				payload = message_data if isinstance(message_data, str) else json.dumps(message_data)
+				await self.publish_callback(alarm.forward_topic, payload)
+			else:
+				logger.warning(
+					f"delivery_method='mqtt' but no callback/forward_topic for '{alarm.alarm_name}'"
 				)
+		elif alarm.webhook_target:
+			data = {
+				"alarm_id": alarm.id,
+				"alarm_name": alarm.alarm_name,
+				"topic": alarm.topic,
+				"condition": alarm.condition,
+				"message_data": message_data,
+			}
+			await deliver_standard_webhook(
+				alarm.webhook_target.url,
+				alarm.webhook_target.signing_secret,
+				ALARM_TRIGGERED_TYPE,
+				data,
+			)
 		else:
-			_logger.info(f"No webhook_url set for alarm '{alarm.alarm_name}'; skipping delivery")
+			logger.info(f"No delivery configured for alarm '{alarm.alarm_name}'; skipping delivery")
 
 	def get_all_pid_ids(self) -> list[str]:
 		return self.pid_store.get_all_pid_ids()

@@ -18,7 +18,7 @@ from pid import PIDControllerStore
 # logging.basicConfig(
 # 	level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 # )
-_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 env = Env()
 
 
@@ -53,10 +53,10 @@ async def setup_topic() -> bool:
 				},
 			)
 			login_data = login_response.json()
-			_logger.debug(f"Login response: {login_data}")
+			logger.debug(f"Login response: {login_data}")
 
 			if "errors" in login_data:
-				_logger.error(f"Login failed: {login_data['errors']}")
+				logger.error(f"Login failed: {login_data['errors']}")
 				return False
 
 			access_token = login_data["data"]["login"]["accessToken"]
@@ -75,21 +75,21 @@ async def setup_topic() -> bool:
 			)
 
 			create_data = create_response.json()
-			_logger.debug(f"Create topic response: {create_data}")
+			logger.debug(f"Create topic response: {create_data}")
 
 			if "errors" in create_data:
 				if "already exists" not in str(create_data["errors"]):
-					_logger.error(f"Topic creation failed: {create_data['errors']}")
+					logger.error(f"Topic creation failed: {create_data['errors']}")
 					return False
 				else:
-					_logger.info("Topic already exists")
+					logger.info("Topic already exists")
 			else:
-				_logger.info(f"Topic created successfully: {topic_name}")
+				logger.info(f"Topic created successfully: {topic_name}")
 
 			return True
 
 		except Exception as e:
-			_logger.error(f"Setup failed: {e}", exc_info=True)
+			logger.error(f"Setup failed: {e}", exc_info=True)
 			return False
 
 
@@ -99,7 +99,7 @@ def resolve_host(hostname: str) -> str:
 		socket.gethostbyname(hostname)
 		return hostname
 	except socket.gaierror:
-		_logger.debug(f"Could not resolve {hostname}, falling back to localhost")
+		logger.debug(f"Could not resolve {hostname}, falling back to localhost")
 		return "127.0.0.1"
 
 
@@ -131,7 +131,7 @@ class LoadCellPublisher:
 		self.excitation_voltage = 10.0  # VDC (within 5-10V range)
 		self.combined_error = 0.0003  # 0.03% expressed as decimal
 
-		_logger.info(f"Initialized publisher for device {self.device_id}")
+		logger.info(f"Initialized publisher for device {self.device_id}")
 
 	async def publish_data(
 		self, interval: float = 1.0, continuous: bool = True, payload_weight: float | None = None
@@ -143,7 +143,7 @@ class LoadCellPublisher:
 
 	async def publish_data_singular(self, payload_weight: float | None = None) -> None:
 		"""Publish a single load cell data point."""
-		_logger.info(f"Attempting to connect to MQTT broker at {self.broker}:{self.port}")
+		logger.info(f"Attempting to connect to MQTT broker at {self.broker}:{self.port}")
 		try:
 			async with Client(
 				hostname=self.broker,
@@ -151,12 +151,12 @@ class LoadCellPublisher:
 				username=self.username,
 				password=self.password,
 			) as client:
-				_logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
+				logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
 
 				payload = self.generate_payload(payload_weight=payload_weight)
 				print(payload)
-				_logger.debug(f"Publishing to topic: {self.topic}")
-				_logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
+				logger.debug(f"Publishing to topic: {self.topic}")
+				logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
 
 				await client.publish(topic=self.topic, payload=json.dumps(payload), qos=self.qos)
 
@@ -166,23 +166,23 @@ class LoadCellPublisher:
 					process_value=payload["measurement"]["weight"]["value"],
 				)
 
-				_logger.info(f"Published reading: {payload['measurement']['weight']['value']} lb")
+				logger.info(f"Published reading: {payload['measurement']['weight']['value']} lb")
 
 		except MqttError as e:
-			_logger.error(f"MQTT Connection Error: {e}", exc_info=True)
+			logger.error(f"MQTT Connection Error: {e}", exc_info=True)
 			if "Not authorized" in str(e):
-				_logger.error("Authentication failed. Please verify:")
-				_logger.error("1. MQTT_USER and MQTT_PASSWORD environment variables are set correctly")
-				_logger.error("2. The credentials have proper permissions on the broker")
+				logger.error("Authentication failed. Please verify:")
+				logger.error("1. MQTT_USER and MQTT_PASSWORD environment variables are set correctly")
+				logger.error("2. The credentials have proper permissions on the broker")
 			elif "Connection refused" in str(e):
-				_logger.error("Connection refused. Please verify that:")
-				_logger.error("1. The MQTT broker is running")
-				_logger.error("2. The broker address and port are correct")
-				_logger.error("3. If using docker-compose, ensure the service is up")
+				logger.error("Connection refused. Please verify that:")
+				logger.error("1. The MQTT broker is running")
+				logger.error("2. The broker address and port are correct")
+				logger.error("3. If using docker-compose, ensure the service is up")
 		except Exception as e:
-			_logger.error(f"Unexpected error: {e}", exc_info=True)
+			logger.error(f"Unexpected error: {e}", exc_info=True)
 
-	async def _mqtt_client(self) -> Client:
+	async def mqtt_client(self) -> Client:
 		return Client(
 			hostname=self.broker,
 			port=self.port,
@@ -197,22 +197,22 @@ class LoadCellPublisher:
 		Fire off up to `max_in_flight` publishes at a time,
 		waiting for ACKs before queuing more.
 		"""
-		async with await self._mqtt_client() as client:
+		async with await self.mqtt_client() as client:
 			sem = asyncio.Semaphore(max_in_flight)
 
-			async def _send() -> None:
+			async def send_one() -> None:
 				# each send holds one slot in the semaphore until acked
 				async with sem:
 					await self.publish_data_static(client, payload_weight=payload_weight)
 
-			tasks = [asyncio.create_task(_send()) for _ in range(n)]
+			tasks = [asyncio.create_task(send_one()) for _ in range(n)]
 			await asyncio.gather(*tasks)
 
 	async def publish_data_continous(
 		self, interval: float = 1.0, payload_weight: float | None = None
 	) -> None:
 		"""Publish load cell data at specified interval."""
-		_logger.info(f"Attempting to connect to MQTT broker at {self.broker}:{self.port}")
+		logger.info(f"Attempting to connect to MQTT broker at {self.broker}:{self.port}")
 		try:
 			async with Client(
 				hostname=self.broker,
@@ -220,14 +220,14 @@ class LoadCellPublisher:
 				username=self.username,
 				password=self.password,
 			) as client:
-				_logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
+				logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
 
 				while True:
 					payload = self.generate_payload(payload_weight=payload_weight)
 					topic = f"sensors/loadcell/{self.device_id}/data"
 
-					_logger.debug(f"Publishing to topic: {topic}")
-					_logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
+					logger.debug(f"Publishing to topic: {topic}")
+					logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
 
 					await client.publish(topic=topic, payload=json.dumps(payload), qos=self.qos)
 
@@ -237,30 +237,30 @@ class LoadCellPublisher:
 						process_value=payload["measurement"]["weight"]["value"],
 					)
 
-					_logger.info(f"Published reading: {payload['measurement']['weight']['value']} lb")
+					logger.info(f"Published reading: {payload['measurement']['weight']['value']} lb")
 
 					await asyncio.sleep(interval)
 		except MqttError as e:
-			_logger.error(f"MQTT Connection Error: {e}", exc_info=True)
+			logger.error(f"MQTT Connection Error: {e}", exc_info=True)
 			if "Not authorized" in str(e):
-				_logger.error("Authentication failed. Please verify:")
-				_logger.error("1. MQTT_USER and MQTT_PASSWORD environment variables are set correctly")
-				_logger.error("2. The credentials have proper permissions on the broker")
+				logger.error("Authentication failed. Please verify:")
+				logger.error("1. MQTT_USER and MQTT_PASSWORD environment variables are set correctly")
+				logger.error("2. The credentials have proper permissions on the broker")
 			elif "Connection refused" in str(e):
-				_logger.error("Connection refused. Please verify that:")
-				_logger.error("1. The MQTT broker is running")
-				_logger.error("2. The broker address and port are correct")
-				_logger.error("3. If using docker-compose, ensure the service is up")
+				logger.error("Connection refused. Please verify that:")
+				logger.error("1. The MQTT broker is running")
+				logger.error("2. The broker address and port are correct")
+				logger.error("3. If using docker-compose, ensure the service is up")
 		except Exception as e:
-			_logger.error(f"Unexpected error: {e}", exc_info=True)
+			logger.error(f"Unexpected error: {e}", exc_info=True)
 
 	async def publish_data_static(self, client: Client, payload_weight: float | None = None) -> None:
 		try:
-			_logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
+			logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
 
 			payload = self.generate_payload(payload_weight=payload_weight)
 
-			_logger.debug(f"Publishing to topic: {self.topic}")
+			logger.debug(f"Publishing to topic: {self.topic}")
 
 			await client.publish(topic=self.topic, payload=json.dumps(payload), qos=self.qos)
 
@@ -271,18 +271,18 @@ class LoadCellPublisher:
 			)
 
 		except MqttError as e:
-			_logger.error(f"MQTT Connection Error: {e}", exc_info=True)
+			logger.error(f"MQTT Connection Error: {e}", exc_info=True)
 			if "Not authorized" in str(e):
-				_logger.error("Authentication failed. Please verify:")
-				_logger.error("1. MQTT_USER and MQTT_PASSWORD environment variables are set correctly")
-				_logger.error("2. The credentials have proper permissions on the broker")
+				logger.error("Authentication failed. Please verify:")
+				logger.error("1. MQTT_USER and MQTT_PASSWORD environment variables are set correctly")
+				logger.error("2. The credentials have proper permissions on the broker")
 			elif "Connection refused" in str(e):
-				_logger.error("Connection refused. Please verify that:")
-				_logger.error("1. The MQTT broker is running")
-				_logger.error("2. The broker address and port are correct")
-				_logger.error("3. If using docker-compose, ensure the service is up")
+				logger.error("Connection refused. Please verify that:")
+				logger.error("1. The MQTT broker is running")
+				logger.error("2. The broker address and port are correct")
+				logger.error("3. If using docker-compose, ensure the service is up")
 		except Exception as e:
-			_logger.error(f"Unexpected error: {e}", exc_info=True)
+			logger.error(f"Unexpected error: {e}", exc_info=True)
 
 	def generate_payload(self, payload_weight: float | None = None) -> dict[str, Any]:
 		"""Generate a realistic Rice Lake RL20000SS load cell reading with metadata."""
@@ -379,33 +379,33 @@ class LoadCellPublisher:
 
 
 async def amain(continuous: bool = True) -> None:
-	_logger.info("Starting publisher")
+	logger.info("Starting publisher")
 
 	# Setup topic before starting publisher
-	_logger.info("Setting up topic...")
+	logger.info("Setting up topic...")
 	if not await setup_topic():
-		_logger.error("Failed to setup topic, exiting")
+		logger.error("Failed to setup topic, exiting")
 		return
 
 	publisher = LoadCellPublisher()
 	try:
 		await publisher.publish_data(interval=2.0, continuous=continuous)
 	except KeyboardInterrupt:
-		_logger.info("Shutting down publisher")
+		logger.info("Shutting down publisher")
 	except Exception as e:
-		_logger.error(f"Error in main: {e}", exc_info=True)
+		logger.error(f"Error in main: {e}", exc_info=True)
 		raise
 
 
 def main(continuous: bool = True) -> None:
 	"""Entry point for the poetry script."""
 	try:
-		_logger.info("Starting Load Cell Publisher")
+		logger.info("Starting Load Cell Publisher")
 		asyncio.run(amain(continuous))
 	except KeyboardInterrupt:
-		_logger.info("Publisher stopped by user")
+		logger.info("Publisher stopped by user")
 	except Exception as e:
-		_logger.error(f"Fatal error: {e}", exc_info=True)
+		logger.error(f"Fatal error: {e}", exc_info=True)
 		sys.exit(1)
 
 
@@ -435,21 +435,21 @@ async def cli_main() -> None:
 
 	try:
 		if args.mode == "continuous":
-			_logger.info(f"Starting continuous publishing with interval {args.interval}s")
+			logger.info(f"Starting continuous publishing with interval {args.interval}s")
 			await publisher.publish_data_continous(
 				interval=args.interval, payload_weight=args.payload_weight
 			)
 		elif args.mode == "singular":
-			_logger.info("Publishing single message")
+			logger.info("Publishing single message")
 			await publisher.publish_data_singular(payload_weight=args.payload_weight)
 		elif args.mode == "n_messages":
-			_logger.info(f"Publishing {args.count} messages")
+			logger.info(f"Publishing {args.count} messages")
 			await publisher.publish_n_messages(args.count, payload_weight=args.payload_weight)
 
 	except KeyboardInterrupt:
-		_logger.info("Publisher stopped by user")
+		logger.info("Publisher stopped by user")
 	except Exception as e:
-		_logger.error(f"Fatal error: {e}", exc_info=True)
+		logger.error(f"Fatal error: {e}", exc_info=True)
 		sys.exit(1)
 
 

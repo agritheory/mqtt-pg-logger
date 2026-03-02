@@ -30,7 +30,7 @@ async def test_failed_login(test_client: QuartClient, execute_graphql: Any) -> N
     """
 	response = await execute_graphql(bad_login_mutation)
 	assert "errors" in response
-	assert "Invalid credentials" in response["errors"][0]
+	assert "Invalid credentials" in response["errors"][0]["message"]
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -71,7 +71,7 @@ async def test_topics_query_with_invalid_token(
 ) -> None:
 	response = await execute_graphql(topics_query, token="invalid_token")
 	assert "errors" in response
-	assert "Authorization required" in response["errors"][0]
+	assert "Authorization required" in response["errors"][0]["message"]
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -91,7 +91,7 @@ async def test_successful_logout(
 
 	topics_response = await execute_graphql(topics_query, token=token)
 	assert "errors" in topics_response
-	assert "Authorization required" in topics_response["errors"][0]
+	assert "Authorization required" in topics_response["errors"][0]["message"]
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -117,7 +117,7 @@ async def test_using_token_after_logout(
 
 	topics_response_after_logout = await execute_graphql(topics_query, token=token)
 	assert "errors" in topics_response_after_logout
-	assert "Authorization required" in topics_response_after_logout["errors"][0]
+	assert "Authorization required" in topics_response_after_logout["errors"][0]["message"]
 
 
 @pytest.mark.asyncio  # type: ignore[misc]
@@ -156,4 +156,4 @@ async def test_failed_token_refresh(
 		variables={"refresh_token": f"{refresh_token}invalidCharacters"},
 	)
 	assert "errors" in response
-	assert "Invalid refresh token" in response["errors"][0]
+	assert "Invalid refresh token" in response["errors"][0]["message"]

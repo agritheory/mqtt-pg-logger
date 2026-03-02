@@ -17,6 +17,7 @@ from strawberry.asgi import GraphQL
 from strawberry.types import Info
 
 from src.signals import alarm_refresh_signal, topic_signal
+from src.webhook_delivery import generate_signing_secret
 
 env = Env()
 
@@ -24,7 +25,7 @@ graphql_bp = Blueprint("graphql", __name__)
 
 token_blacklist = set()
 
-_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 alarm_signal = alarm_refresh_signal
 
@@ -106,11 +107,6 @@ def verify_token(token: str) -> dict | None:
 
 
 async def load_user_context(user_context: dict) -> "User":
-	query = """
-	SELECT id, username, disabled, refresh_token, creation, modified, owner, modified_by
-	FROM "user"
-	WHERE username = :username
-	"""
 	if not user_context:
 		raise GraphQLError("Authorization required")
 
@@ -123,16 +119,21 @@ async def load_user_context(user_context: dict) -> "User":
 			"jti": getattr(user_context, "jti", None),
 		}
 
-	# Handle dictionary case
 	username = user_context.get("sub")
 	if not username:
 		raise GraphQLError("Invalid token format")
 
-	row = await current_app.db.fetch_one(query=query, values={"username": username})
+	row = await current_app.db.fetchrow(
+		"""
+		SELECT id, username, disabled, refresh_token, creation, modified, owner, modified_by
+		FROM "user"
+		WHERE username = $1
+		""",
+		username,
+	)
 	if not row:
 		raise GraphQLError("User not found")
 
-	# Convert row to dict and merge with user_context
 	row_dict = dict(row)
 	user_data = {**row_dict, **user_context}
 	user = User(**user_data)
@@ -228,6 +229,27 @@ class JournalEntry:
 
 @dataclass
 @strawberry.type
+class Webhook:
+	id: int
+	name: str
+	url: str
+	signing_secret: str
+	disabled: bool
+	creation: datetime.datetime
+	modified: datetime.datetime
+	owner_id: int
+	modified_by_id: int
+
+
+@strawberry.input
+class WebhookInput:
+	name: str
+	url: str
+	disabled: bool = False
+
+
+@dataclass
+@strawberry.type
 class Alarm:
 	id: int
 	condition: str
@@ -239,7 +261,8 @@ class Alarm:
 	topic: str
 	alarm_name: str
 	delivery_method: str
-	webhook_url: str | None
+	webhook_id: int | None
+	forward_topic: str | None = None
 
 
 @strawberry.input
@@ -252,7 +275,8 @@ class AlarmInput:
 	delivery_method: str
 	disabled: bool = False
 	id: int | None = None
-	webhook_url: str | None = None
+	webhook_id: int | None = None
+	forward_topic: str | None = None
 
 
 @strawberry.type
@@ -260,48 +284,54 @@ class Query:
 	@strawberry.field  # type: ignore[misc]
 	@token_required
 	async def get_topics(self, info: Info[Context, Any]) -> list[Topic]:
-		query = """
+		rows = await current_app.db.fetch(
+			"""
 			SELECT id, topic, disabled, creation, modified, owner, modified_by
 			FROM topic
 			WHERE disabled = false
 			ORDER BY topic
-		"""
-		rows = await current_app.db.fetch_all(query=query)
-		return [Topic(**row) for row in rows]
+			"""
+		)
+		return [Topic(**dict(row)) for row in rows]
 
 	@strawberry.field  # type: ignore[misc]
 	@token_required
 	async def get_topic(self, info: Info, topic_id: int) -> Topic | None:
-		query = """
-		SELECT id, topic, disabled, creation, modified, owner, modified_by
-		FROM topic
-		WHERE id = :topic_id
-		"""
-		row = await current_app.db.fetch_one(query=query, values={"topic_id": topic_id})
-		return Topic(**row) if row else None
+		row = await current_app.db.fetchrow(
+			"""
+			SELECT id, topic, disabled, creation, modified, owner, modified_by
+			FROM topic
+			WHERE id = $1
+			""",
+			topic_id,
+		)
+		return Topic(**dict(row)) if row else None
 
 	@strawberry.field  # type: ignore[misc]
 	@token_required
 	async def get_users(self, info: Info) -> list[User]:
-		query = """
-		SELECT id, username, disabled, creation, modified, owner, modified_by
-		FROM "user"
-		WHERE disabled = false
-		ORDER BY username
-		"""
-		rows = await current_app.db.fetch_all(query=query)
-		return [User(**row) for row in rows]
+		rows = await current_app.db.fetch(
+			"""
+			SELECT id, username, disabled, creation, modified, owner, modified_by
+			FROM "user"
+			WHERE disabled = false
+			ORDER BY username
+			"""
+		)
+		return [User(**dict(row)) for row in rows]
 
 	@strawberry.field  # type: ignore[misc]
 	@token_required
 	async def get_user(self, info: Info, user_id: int) -> User | None:
-		query = """
-		SELECT id, username, disabled, creation, modified, owner, modified_by
-		FROM "user"
-		WHERE id = :user_id
-		"""
-		row = await current_app.db.fetch_one(query=query, values={"user_id": user_id})
-		return User(**row) if row else None
+		row = await current_app.db.fetchrow(
+			"""
+			SELECT id, username, disabled, creation, modified, owner, modified_by
+			FROM "user"
+			WHERE id = $1
+			""",
+			user_id,
+		)
+		return User(**dict(row)) if row else None
 
 	@strawberry.field  # type: ignore[misc]
 	@token_required
@@ -317,7 +347,7 @@ class Query:
 
 		if hasattr(current_app, "db"):
 			try:
-				await current_app.db.execute("SELECT 1")
+				await current_app.db.fetchval("SELECT 1")
 			except Exception as e:
 				health_status.status = "error"
 				health_status.timescaledb_status = str(e)
@@ -354,21 +384,22 @@ class Query:
 		end_time: datetime.datetime | None = None,
 		limit: int = 100,
 	) -> list[JournalEntry]:
-		conditions = []
-		values: dict = {}
+		args: list[Any] = []
+		conditions: list[str] = []
 
 		if topic is not None:
-			conditions.append("topic = :topic")
-			values["topic"] = topic
+			args.append(topic)
+			conditions.append(f"topic = ${len(args)}")
 
 		if start_time is not None:
-			conditions.append("creation >= :start_time")
-			values["start_time"] = start_time
+			args.append(start_time)
+			conditions.append(f"creation >= ${len(args)}")
 
 		if end_time is not None:
-			conditions.append("creation <= :end_time")
-			values["end_time"] = end_time
+			args.append(end_time)
+			conditions.append(f"creation <= ${len(args)}")
 
+		args.append(min(limit, 1000))
 		where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
 		query = f"""
@@ -376,24 +407,61 @@ class Query:
 			FROM journal
 			{where_clause}
 			ORDER BY creation DESC
-			LIMIT :limit
+			LIMIT ${len(args)}
 		"""
-		values["limit"] = min(limit, 1000)
 
-		rows = await current_app.db.fetch_all(query=query, values=values)
+		rows = await current_app.db.fetch(query, *args)
 		return [JournalEntry(**dict(row)) for row in rows]
+
+	@strawberry.field  # type: ignore[misc]
+	@token_required
+	async def webhook(self, info: Info, id: int) -> Webhook | None:
+		"""Get a single webhook by ID"""
+		row = await current_app.db.fetchrow(
+			"""
+			SELECT id, name, url, signing_secret, disabled, creation, modified, owner_id, modified_by_id
+			FROM webhook
+			WHERE id = $1
+			""",
+			id,
+		)
+		return Webhook(**dict(row)) if row else None
+
+	@strawberry.field  # type: ignore[misc]
+	@token_required
+	async def get_webhooks(
+		self,
+		info: Info,
+		disabled: bool | None = None,
+	) -> list[Webhook]:
+		args: list[Any] = []
+		conditions: list[str] = []
+		if disabled is not None:
+			args.append(disabled)
+			conditions.append(f"disabled = ${len(args)}")
+		where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+		query = f"""
+			SELECT id, name, url, signing_secret, disabled, creation, modified, owner_id, modified_by_id
+			FROM webhook
+			{where_clause}
+			ORDER BY modified DESC
+		"""
+		rows = await current_app.db.fetch(query, *args)
+		return [Webhook(**dict(row)) for row in rows]
 
 	@strawberry.field  # type: ignore[misc]
 	@token_required
 	async def alarm(self, info: Info, id: int) -> Alarm | None:
 		"""Get a single alarm by ID"""
-		query = """
+		row = await current_app.db.fetchrow(
+			"""
 			SELECT id, condition, owner, creation, modified, modified_by,
-				disabled, topic, alarm_name, delivery_method, webhook_url
+				disabled, topic, alarm_name, delivery_method, webhook_id, forward_topic
 			FROM alarm
-			WHERE id = :alarm_id
-		"""
-		row = await current_app.db.fetch_one(query=query, values={"alarm_id": id})
+			WHERE id = $1
+			""",
+			id,
+		)
 		return Alarm(**dict(row)) if row else None
 
 	@strawberry.field  # type: ignore[misc]
@@ -405,33 +473,31 @@ class Query:
 		topic: str | None = None,
 		disabled: bool | None = None,
 	) -> list[Alarm]:
+		args: list[Any] = []
+		conditions: list[str] = []
 
-		conditions = []
-		values = {}
 		if owner is not None:
-			conditions.append("owner = :owner")
-			values["owner"] = owner
+			args.append(owner)
+			conditions.append(f"owner = ${len(args)}")
 
 		if topic is not None:
-			conditions.append("topic = :topic")
-			values["topic"] = topic
+			args.append(topic)
+			conditions.append(f"topic = ${len(args)}")
 
 		if disabled is not None:
-			conditions.append("disabled = :disabled")
-			values["disabled"] = str(disabled)
+			args.append(disabled)
+			conditions.append(f"disabled = ${len(args)}")
 
-		where_clause = " AND ".join(conditions)
-		where_clause = f"WHERE {where_clause}" if where_clause else ""
-
+		where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 		query = f"""
 			SELECT id, condition, owner, creation, modified, modified_by,
-				disabled, topic, alarm_name, delivery_method, webhook_url
+				disabled, topic, alarm_name, delivery_method, webhook_id, forward_topic
 			FROM alarm
 			{where_clause}
 			ORDER BY modified DESC
 		"""
 
-		rows = await current_app.db.fetch_all(query=query, values=values)
+		rows = await current_app.db.fetch(query, *args)
 		return [Alarm(**dict(row)) for row in rows]
 
 
@@ -439,13 +505,15 @@ class Query:
 class Mutation:
 	@strawberry.mutation  # type: ignore[misc]
 	async def login(self, info: Info[Context, Any], input: LoginInput) -> AuthResponse:
-		query = """
+		user = await current_app.db.fetchrow(
+			"""
 			SELECT id, username, password_hash, disabled
 			FROM "user"
-			WHERE username = :username
+			WHERE username = $1
 			AND disabled = FALSE
-		"""
-		user = await current_app.db.fetch_one(query=query, values={"username": input.username})
+			""",
+			input.username,
+		)
 
 		if not user:
 			raise GraphQLError("Invalid credentials")
@@ -466,12 +534,14 @@ class Mutation:
 
 		access_token = generate_token(user["username"])
 		refresh_token = generate_token(
-			user["username"], expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES"))
+			user["username"],
+			expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES")),
 		)
 
 		await current_app.db.execute(
-			'UPDATE "user" SET refresh_token = :refresh_token WHERE id = :user_id',
-			values={"refresh_token": bytes(refresh_token.encode()), "user_id": user["id"]},
+			'UPDATE "user" SET refresh_token = $1 WHERE id = $2',
+			bytes(refresh_token.encode()),
+			user["id"],
 		)
 
 		return AuthResponse(
@@ -498,12 +568,14 @@ class Mutation:
 
 		new_access_token = generate_token(user.username)
 		new_refresh_token = generate_token(
-			user.username, expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES"))
+			user.username,
+			expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES")),
 		)
 
 		await current_app.db.execute(
-			'UPDATE "user" SET refresh_token = :refresh_token WHERE id = :user_id',
-			values={"refresh_token": bytes(new_refresh_token.encode()), "user_id": user.id},
+			'UPDATE "user" SET refresh_token = $1 WHERE id = $2',
+			bytes(new_refresh_token.encode()),
+			user.id,
 		)
 
 		return AuthResponse(
@@ -525,48 +597,46 @@ class Mutation:
 	@token_required
 	async def create_topic(self, info: Info, input: TopicInput) -> Topic:
 		user = await load_user_context(info.context.user)
-		values = {
-			"topic": str(input.topic),
-			"disabled": bool(input.disabled),
-			"owner": user.username,
-			"modified_by": user.username,
-		}
-		query = """
-		INSERT INTO topic (topic, disabled, owner, modified_by)
-		VALUES (:topic, :disabled, :owner, :modified_by)
-		ON CONFLICT (topic) DO UPDATE
-		SET disabled    = EXCLUDED.disabled,
-			owner       = EXCLUDED.owner,
-			modified_by = EXCLUDED.modified_by,
-			modified    = NOW()
-		RETURNING id, topic, disabled, creation, modified, owner, modified_by
-		"""
-		row = await current_app.db.fetch_one(query=query, values=values)
-		await topic_signal.send_async("add_topic", topic=values["topic"])
-		return Topic(**row)
+		row = await current_app.db.fetchrow(
+			"""
+			INSERT INTO topic (topic, disabled, owner, modified_by)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (topic) DO UPDATE
+			SET disabled    = EXCLUDED.disabled,
+				owner       = EXCLUDED.owner,
+				modified_by = EXCLUDED.modified_by,
+				modified    = NOW()
+			RETURNING id, topic, disabled, creation, modified, owner, modified_by
+			""",
+			str(input.topic),
+			bool(input.disabled),
+			user.username,
+			user.username,
+		)
+		await topic_signal.send_async("add_topic", topic=str(input.topic))
+		return Topic(**dict(row))
 
 	@strawberry.mutation  # type: ignore[misc]
 	@token_required
 	async def update_topic(self, info: Info, id: int, input: TopicInput) -> Topic:
 		user = await load_user_context(info.context.user)
-		query = """
-		UPDATE topic
-		SET topic = :topic,
-			disabled = :disabled,
-			modified = CURRENT_TIMESTAMP,
-			modified_by = :modified_by
-		WHERE id = :id
-		RETURNING id, topic, disabled, creation, modified, owner, modified_by
-		"""
-		values = {
-			"id": id,
-			"topic": input.topic,
-			"disabled": input.disabled,
-			"modified_by": user.username,
-		}
-		row = await current_app.db.fetch_one(query=query, values=values)
+		row = await current_app.db.fetchrow(
+			"""
+			UPDATE topic
+			SET topic = $1,
+				disabled = $2,
+				modified = CURRENT_TIMESTAMP,
+				modified_by = $3
+			WHERE id = $4
+			RETURNING id, topic, disabled, creation, modified, owner, modified_by
+			""",
+			input.topic,
+			input.disabled,
+			user.username,
+			id,
+		)
 		await topic_signal.send_async("add_topic", topic=str(input.topic))
-		return Topic(**row)
+		return Topic(**dict(row))
 
 	@strawberry.mutation  # type: ignore[misc]
 	@token_required
@@ -575,21 +645,20 @@ class Mutation:
 		env = Env()
 		f = Fernet(env.str("FERNET_KEY").encode())
 
-		encrypted_password = f.encrypt(input.password.encode()) if input.password else ""
-		query = """
-		INSERT INTO "user" (username, password_hash, disabled, owner, modified_by)
-		VALUES (:username, :password, :disabled, :owner, :modified_by)
-		RETURNING id, username, disabled, creation, modified, owner, modified_by
-		"""
-		values = {
-			"username": input.username,
-			"password": encrypted_password,
-			"disabled": input.disabled,
-			"owner": user.username,
-			"modified_by": user.username,
-		}
-		row = await current_app.db.fetch_one(query=query, values=values)
-		return User(**row)
+		encrypted_password = f.encrypt(input.password.encode()) if input.password else b""
+		row = await current_app.db.fetchrow(
+			"""
+			INSERT INTO "user" (username, password_hash, disabled, owner, modified_by)
+			VALUES ($1, $2, $3, $4, $5)
+			RETURNING id, username, disabled, creation, modified, owner, modified_by
+			""",
+			input.username,
+			encrypted_password,
+			input.disabled,
+			user.username,
+			user.username,
+		)
+		return User(**dict(row))
 
 	@strawberry.mutation  # type: ignore[misc]
 	@token_required
@@ -597,84 +666,110 @@ class Mutation:
 		user = await load_user_context(info.context.user)
 		env = Env()
 		f = Fernet(env.str("FERNET_KEY").encode())
-		query = """
-		UPDATE "user"
-		SET username = :username,
-			password_hash = :password,
-			disabled = :disabled,
-			modified = CURRENT_TIMESTAMP,
-			modified_by = :modified_by
-		WHERE id = :id
-		RETURNING id, username, disabled, creation, modified, owner, modified_by
-		"""
-		values = {
-			"id": id,
-			"username": input.username,
-			"password": f.encrypt(input.password.encode()),
-			"disabled": input.disabled,
-			"modified_by": user.username,
-		}
-		row = await current_app.db.fetch_one(query=query, values=values)
-		return User(**row)
+		row = await current_app.db.fetchrow(
+			"""
+			UPDATE "user"
+			SET username = $1,
+				password_hash = $2,
+				disabled = $3,
+				modified = CURRENT_TIMESTAMP,
+				modified_by = $4
+			WHERE id = $5
+			RETURNING id, username, disabled, creation, modified, owner, modified_by
+			""",
+			input.username,
+			f.encrypt(input.password.encode()),
+			input.disabled,
+			user.username,
+			id,
+		)
+		return User(**dict(row))
+
+	@strawberry.mutation  # type: ignore[misc]
+	@token_required
+	async def create_webhook(self, info: Info, input: WebhookInput) -> Webhook:
+		user = await load_user_context(info.context.user)
+		signing_secret = generate_signing_secret()
+		row = await current_app.db.fetchrow(
+			"""
+			INSERT INTO webhook (name, url, signing_secret, disabled, owner_id, modified_by_id)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			RETURNING id, name, url, signing_secret, disabled, creation, modified, owner_id, modified_by_id
+			""",
+			input.name,
+			input.url,
+			signing_secret,
+			input.disabled,
+			user.id,
+			user.id,
+		)
+		return Webhook(**dict(row))
 
 	@strawberry.mutation  # type: ignore[misc]
 	@token_required
 	async def alarm(self, info: Info, input: AlarmInput) -> Alarm:
 		user = await load_user_context(info.context.user)
 
+		if input.delivery_method == "mqtt":
+			if not input.forward_topic:
+				raise GraphQLError("forward_topic is required when delivery_method is 'mqtt'")
+			if input.forward_topic == input.topic:
+				raise GraphQLError(
+					"forward_topic cannot equal topic: forwarding a message back to its own "
+					"source topic would create an infinite loop"
+				)
+
 		if input.id is None:
-			query = """
+			row = await current_app.db.fetchrow(
+				"""
 				INSERT INTO alarm (
 					condition, owner, modified_by, topic,
-					alarm_name, delivery_method, disabled, webhook_url
+					alarm_name, delivery_method, disabled, webhook_id, forward_topic
 				)
-				VALUES (
-					:condition, :owner, :modified_by, :topic,
-					:alarm_name, :delivery_method, :disabled, :webhook_url
-				)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 				RETURNING id, condition, owner, creation, modified, modified_by,
-					disabled, topic, alarm_name, delivery_method, webhook_url
-			"""
-			values = {
-				"condition": input.condition,
-				"owner": input.owner,
-				"modified_by": user.username,
-				"topic": input.topic,
-				"alarm_name": input.alarm_name,
-				"delivery_method": input.delivery_method,
-				"disabled": input.disabled,
-				"webhook_url": input.webhook_url,
-			}
+					disabled, topic, alarm_name, delivery_method, webhook_id, forward_topic
+				""",
+				input.condition,
+				input.owner,
+				user.username,
+				input.topic,
+				input.alarm_name,
+				input.delivery_method,
+				input.disabled,
+				input.webhook_id,
+				input.forward_topic,
+			)
 		else:
-			# Update existing alarm
-			query = """
+			row = await current_app.db.fetchrow(
+				"""
 				UPDATE alarm
-				SET condition = :condition,
-					owner = :owner,
-					modified_by = :modified_by,
-					topic = :topic,
-					alarm_name = :alarm_name,
-					delivery_method = :delivery_method,
-					disabled = :disabled,
-					webhook_url = :webhook_url,
+				SET condition = $1,
+					owner = $2,
+					modified_by = $3,
+					topic = $4,
+					alarm_name = $5,
+					delivery_method = $6,
+					disabled = $7,
+					webhook_id = $8,
+					forward_topic = $9,
 					modified = CURRENT_TIMESTAMP
-				WHERE id = :id
+				WHERE id = $10
 				RETURNING id, condition, owner, creation, modified, modified_by,
-					disabled, topic, alarm_name, delivery_method, webhook_url
-			"""
-			values = {
-				"id": input.id,
-				"condition": input.condition,
-				"owner": input.owner,
-				"modified_by": user.username,
-				"topic": input.topic,
-				"alarm_name": input.alarm_name,
-				"delivery_method": input.delivery_method,
-				"disabled": input.disabled,
-				"webhook_url": input.webhook_url,
-			}
+					disabled, topic, alarm_name, delivery_method, webhook_id, forward_topic
+				""",
+				input.condition,
+				input.owner,
+				user.username,
+				input.topic,
+				input.alarm_name,
+				input.delivery_method,
+				input.disabled,
+				input.webhook_id,
+				input.forward_topic,
+				input.id,
+			)
 
-		row = await current_app.db.fetch_one(query=query, values=values)
 		await alarm_signal.send_async("refresh_alarms")
 		return Alarm(**dict(row))
 
@@ -731,8 +826,11 @@ async def graphql_handler() -> Response:
 			operation_name=data.get("operationName"),
 		)
 
-		return jsonify(
-			{"data": result.data} if result.data else {"errors": [str(err) for err in result.errors]}
-		)
+		response: dict = {}
+		if result.data is not None:
+			response["data"] = result.data
+		if result.errors:
+			response["errors"] = [{"message": str(err)} for err in result.errors]
+		return jsonify(response)
 
-	return jsonify({"errors": ["Invalid Content-Type"]}), 400
+	return jsonify({"errors": [{"message": "Invalid Content-Type"}]}), 400

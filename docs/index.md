@@ -1,20 +1,19 @@
 # MQTT Logger
 
-Depends on Apache ActiveMQ Artemis and TimescaleDB
+Subscribes to MQTT topics, stores messages in TimescaleDB, and exposes a GraphQL API for configuration, querying, and alarm management.
 
-Exposes a GraphQL API for configuration
+Depends on Apache ActiveMQ Artemis and TimescaleDB.
 
-Running `docker compose up --build` will start three services:
- - A TimescaleDB container
- - An Artemis Active MQ container
- - A python container running Quart
+Running `docker compose up --build` starts three services:
+- A TimescaleDB container
+- An ActiveMQ Artemis container
+- A Python/Quart container running the application
 
-## Configuration options:
+## Configuration
 
-### Quart configuration
+### Application
 
 ```env
-# Quart
 SECRET_KEY=yohjohthieNguvayaiFaeph5Oomae9nu
 FERNET_KEY=D7jNgKGahOrZtQVd9reaT53B4SAz-gLH2ZJtRStpCsY=
 JWT_SECRET_KEY=59eggsXI2uU2eaWmmOcr_zMKfhE4rW-h0avo0IKNJS4
@@ -25,9 +24,9 @@ REFRESH_TOKEN_EXPIRES=2592000
 CORS_ORIGINS=["*"]
 ```
 
-### TimescaleDB Configuration options
+### TimescaleDB
+
 ```env
-# Database Configuration
 DB_HOST=timescaledb
 DB_PORT=5432
 DB_NAME=postgres
@@ -35,16 +34,16 @@ DB_USER=postgres
 DB_PASSWORD=postgres
 ```
 
-### Admin account user configuration
+### Admin Account
+
 ```env
-# Admin User Configuration
 ADMIN_EMAIL=admin@agritheory.dev
 ADMIN_PASSWORD=ohch4GeiSie
 ```
 
-### MQTT Broker (Active MQ Artemis) configuration
+### MQTT Broker (ActiveMQ Artemis)
+
 ```env
-#MQTT Broker config
 MQTT_BROKER_HOST=artemis
 MQTT_BROKER_PORT=1883
 MQTT_BROKER_WEB_CONSOLE_PORT=8161
@@ -53,58 +52,266 @@ MQTT_PASSWORD=artemis
 SSL_INSECURE=True
 MQTT_CLIENT_ID=mqtt-logger
 MQTT_KEEPALIVE=60
-MQTT_DEFAULT_PROTOCOL=5  # 5==MQTTv5, default: 4==MQTTv311, 3==MQTTv31
+MQTT_DEFAULT_PROTOCOL=5   # 5=MQTTv5, 4=MQTTv311, 3=MQTTv31
 MQTT_DEFAULT_QUALITY=1
 ```
 
-### Production configuration
-```env
-# Caddy
-DOMAIN=''
+### Topic Filtering
 
-# SSL config for Artemis
+```env
+LOG_ALL_TOPICS=false      # Auto-register topics seen on the broker
+ALLOW_ALL_TOPICS=false    # Store messages for all topics, not just registered ones
+```
+
+### Production
+
+```env
+DOMAIN=''
 SSL_CA_CERTS=''
 SSL_CERTFILE=''
 SSL_KEYFILE=''
 ```
 
-## Using the GraphQL API
+---
 
-You can expose the GraphiQL interface, which in development will be located at http:localhost:5000/graphql/. The default admin username and password are set in the `.env` file; reusing this username and password is fine for testing and development but should not be used in production.
+## GraphQL API
+
+The GraphiQL IDE is available at `http://localhost:5000/graphql/` in development.
+
+All queries and mutations except `login` require a Bearer token in the `Authorization` header.
+
+### Authentication
+
+#### Login
 
 ```graphql
 mutation Login($username: String!, $password: String!) {
-  login(input: {
-    username: $username,
-    password: $password
-  }) {
-    message
-    accessToken
-    refreshToken
-    tokenType
-    expiresIn
-  }
+	login(input: { username: $username, password: $password }) {
+		message
+		accessToken
+		refreshToken
+		tokenType
+		expiresIn
+	}
 }
 ```
-You can then copy that JWT token to create a header like:
+
+Use the returned `accessToken` as a Bearer token:
+
+```json
+{ "Authorization": "Bearer <accessToken>" }
+```
+
+#### Refresh Token
+
+```graphql
+mutation RefreshToken($refreshToken: String!) {
+	refreshToken(input: { refreshToken: $refreshToken }) {
+		accessToken
+		refreshToken
+		expiresIn
+	}
+}
+```
+
+#### Logout
+
+```graphql
+mutation {
+	logout
+}
+```
+
+---
+
+### Topics
+
+Topics control which MQTT subjects the logger subscribes to and stores.
+
+```graphql
+mutation {
+	createTopic(input: { topic: "sensors/loadcell/#" }) {
+		id
+		topic
+	}
+}
+```
+
+```graphql
+query {
+	getTopics {
+		id
+		topic
+		disabled
+		creation
+		modified
+	}
+}
+```
+
+---
+
+### Journal
+
+The journal stores every received MQTT message. Entries are queryable with optional filters.
+
+```graphql
+query GetJournalEntries(
+	$topic: String
+	$startTime: DateTime
+	$endTime: DateTime
+	$limit: Int
+) {
+	getJournalEntries(
+		topic: $topic
+		startTime: $startTime
+		endTime: $endTime
+		limit: $limit
+	) {
+		id
+		topic
+		text
+		data
+		creation
+	}
+}
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `topic` | String | Exact topic match |
+| `startTime` | DateTime | Inclusive lower bound on `creation` (ISO 8601) |
+| `endTime` | DateTime | Inclusive upper bound on `creation` (ISO 8601) |
+| `limit` | Int | Maximum results (default 100, max 1000) |
+
+Results are ordered by `creation DESC`.
+
+**Example — last 50 readings from a sensor:**
+
+```graphql
+query {
+	getJournalEntries(topic: "sensors/loadcell/RL20000SS-500LB/data" limit: 50) {
+		id
+		text
+		creation
+	}
+}
+```
+
+**Example — time-windowed query:**
+
+```graphql
+query {
+	getJournalEntries(
+		topic: "sensors/temperature/room1"
+		startTime: "2025-01-15T00:00:00Z"
+		endTime: "2025-01-15T23:59:59Z"
+	) {
+		id
+		data
+		creation
+	}
+}
+```
+
+---
+
+### Alarms and Webhooks
+
+See [alarms.md](./alarms.md) for the full alarm and webhook API reference.
+
+**Quick reference — webhook delivery:**
+
+```graphql
+# Create a webhook endpoint
+mutation {
+	createWebhook(input: {
+		name: "SCADA Receiver"
+		url: "https://erp.example.com/api/method/scada.api.receive_alarm"
+	}) {
+		id
+		signingSecret   # store this — not recoverable
+	}
+}
+
+# Create an alarm that POSTs to the webhook on trigger
+mutation {
+	alarm(input: {
+		condition: "message['temperature'] > 75"
+		owner: "admin@agritheory.dev"
+		modifiedBy: "admin@agritheory.dev"
+		topic: "sensors/temperature/room1"
+		alarmName: "Overheat Warning"
+		deliveryMethod: "webhook"
+		webhookId: 1
+	}) {
+		id
+		alarmName
+	}
+}
+```
+
+**Quick reference — MQTT filter/forward:**
+
+```graphql
+# Republish matching messages to a different topic
+mutation {
+	alarm(input: {
+		condition: "message['temperature'] > 75"
+		owner: "admin@agritheory.dev"
+		modifiedBy: "admin@agritheory.dev"
+		topic: "sensors/temperature/room1"
+		alarmName: "Overheat — Forward to SCADA"
+		deliveryMethod: "mqtt"
+		forwardTopic: "scada/alarms/overheat"
+	}) {
+		id
+		alarmName
+		forwardTopic
+	}
+}
+```
+
+---
+
+### Health Check
+
+```graphql
+query {
+	health {
+		status
+		timestamp
+		mqttConnection
+		timescaledbStatus
+		artemisStatus
+	}
+}
+```
+
+---
+
+## Error Format
+
+All errors follow the GraphQL specification:
 
 ```json
 {
-  "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbkBhZ3JpdGhlb3J5LmRldiIsImV4cCI6MTc0MzI2Mjg3OSwiaWF0IjoxNzQzMjU5Mjc5LCJqdGkiOiJESkcwWnRldWJLd0ljUTh4SEE4R1ZBIn0.xYf-HL1ipYmToS0-LIGHk5wWKqHu7y93dNt5LynVVk8"
-}
-```
-And query like:
-
-```graphql
-query HealthCheck{
-  health {
-    status
-    timestamp
-    mqttConnection
-    timescaledbStatus
-    artemisStatus
-  }
+  "errors": [
+    { "message": "Authorization required" }
+  ]
 }
 ```
 
+When a query partially succeeds, both `data` and `errors` are present.
 
+---
+
+## Generating Cryptographic Keys
+
+```bash
+# Fernet key (for encrypting stored passwords)
+poetry run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+# JWT secret (any sufficiently random string)
+poetry run python -c "import secrets; print(secrets.token_urlsafe(32))"
+```

@@ -2,19 +2,19 @@ import logging
 from typing import Any
 
 import aiomqtt
+import asyncpg
 from aiomqtt import Client as AIOMQTTClient
 from aiomqtt import ProtocolVersion, TLSParameters
-from databases import Database
 from environs import Env
 
 from src.alarm import Alarm
 from src.signals import topic_signal
 
-_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class MQTTLogger:
-	def __init__(self, db: Database, broker_url: str = "localhost", broker_port: int = 1883):
+	def __init__(self, db: asyncpg.Pool, broker_url: str = "localhost", broker_port: int = 1883):
 		env = Env()
 		env.read_env()
 		self._running = False
@@ -32,6 +32,7 @@ class MQTTLogger:
 		self.topics = {"#"} if self.allow_all_topics else set()
 		self.topic_signal = topic_signal
 		self.topic_signal.connect(self.add_topic)
+		self._active_client: AIOMQTTClient | None = None
 
 		if not env.bool("SSL_INSECURE"):
 			# TODO not tested or implemented
@@ -41,10 +42,10 @@ class MQTTLogger:
 				keyfile=env.str("SSL_KEYFILE"),
 			)
 
-		self.alarm = Alarm()
+		self.alarm = Alarm(publish_callback=self.forward)
 
 	@property
-	def _topics(self) -> set:
+	def effective_topics(self) -> set:
 		return self.topics
 
 	def client(self) -> AIOMQTTClient:
@@ -62,14 +63,14 @@ class MQTTLogger:
 		return _client
 
 	async def get_topics(self) -> set:
-		query = """
+		rows = await self.db.fetch(
+			"""
 			SELECT id, topic, disabled, creation, modified, owner, modified_by
 			FROM topic
 			WHERE disabled = false
 			ORDER BY topic
-		"""
-
-		rows = await self.db.fetch_all(query=query)
+			"""
+		)
 		if not rows:
 			return {"#"}  # fallback if no topics are configured
 		return {row["topic"] for row in rows}
@@ -79,81 +80,80 @@ class MQTTLogger:
 		self.topics = await self.get_topics()
 		try:
 			async with self.client() as client:
-				_logger.info(f"MQTT client connected to {self.broker_url}:{self.broker_port}")
-				_logger.info(f"Filtering on topics {self._topics}")
-				for topic in self._topics:
+				self._active_client = client
+				logger.info(f"MQTT client connected to {self.broker_url}:{self.broker_port}")
+				logger.info(f"Filtering on topics {self.effective_topics}")
+				# Snapshot to avoid "Set changed size during iteration" when add_topic runs concurrently
+				for topic in tuple(self.effective_topics):
 					await client.subscribe(topic=topic, qos=1)
 
 				async for message in client.messages:
-					# _logger.info(f"Payload: {message.payload}")
 					await self.handle_message(message)
 
 		except Exception as e:
-			_logger.error(f"Failed to start MQTT client: {e}")
+			logger.error(f"Failed to start MQTT client: {e}")
 			raise
+		finally:
+			self._active_client = None
+
+	async def forward(self, topic: str, payload: str) -> None:
+		"""Publish a message back to the broker (used by filter/forward alarms)."""
+		if self._active_client is not None:
+			await self._active_client.publish(topic, payload)
+		else:
+			logger.warning(f"Cannot forward to '{topic}': MQTT client not connected")
 
 	async def handle_message(self, message: aiomqtt.Message) -> None:
 		try:
 			await self.store_message(message)
 		except Exception as e:
-			_logger.error(f"Failed to store message: {e}")
+			logger.error(f"Failed to store message: {e}")
 
 		try:
 			await self.alarm.handle_message(message)
 		except Exception as e:
-			_logger.error(f"Failed to handle alarm: {e}")
+			logger.error(f"Failed to handle alarm: {e}")
 
 	async def store_message(self, message: aiomqtt.Message) -> None:
+		# Snapshot to avoid "Set changed size during iteration" when add_topic runs concurrently
+		topics_snapshot = tuple(self.effective_topics)
 		if self.log_all_topics:
-			if str(message.topic) not in self._topics:
-				_logger.info(f"Topic added: '{message.topic}'")
+			if str(message.topic) not in topics_snapshot:
+				logger.info(f"Topic added: '{message.topic}'")
 				await self.save_topic(message)
 		else:
-			_logger.warning(f"Topic not collected: '{message.topic}'")
+			logger.warning(f"Topic not collected: '{message.topic}'")
 		if not self.allow_all_topics:
-			if str(message.topic) not in self._topics:
-				_logger.warning(f"Message not collected: '{message.topic}'")
+			if str(message.topic) not in topics_snapshot:
+				logger.warning(f"Message not collected: '{message.topic}'")
 				return
-		query = """
+
+		await self.db.execute(
+			"""
 			INSERT INTO journal
 			(topic, text, qos, retain, entrypoint, priority)
-			VALUES (
-				:topic,
-				:text,
-				:qos,
-				:retain,
-				:entrypoint,
-				:priority
-			)
-			RETURNING id
-		"""
-
-		values = {
-			"topic": str(message.topic),
-			"text": message.payload.decode(),
-			"qos": message.qos,
-			"retain": message.retain,
-			"entrypoint": "mqtt",
-			"priority": 0,
-		}
-		async with self.db.transaction():
-			await self.db.execute(query=query, values=values)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			""",
+			str(message.topic),
+			message.payload.decode(),
+			message.qos,
+			message.retain,
+			"mqtt",
+			0,
+		)
 
 	async def save_topic(self, message: aiomqtt.Message) -> None:
-		query = """
-		INSERT INTO topic (topic, disabled, owner, modified_by)
-		VALUES (:topic, :disabled, :owner, :modified_by)
-		ON CONFLICT (topic) DO NOTHING
-		RETURNING id
-		"""
-		values = {
-			"topic": str(message.topic),
-			"disabled": False,
-			"owner": self.username,
-			"modified_by": self.username,
-		}
-		async with self.db.transaction():
-			await self.db.execute(query=query, values=values)
+		await self.db.execute(
+			"""
+			INSERT INTO topic (topic, disabled, owner, modified_by)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (topic) DO NOTHING
+			""",
+			str(message.topic),
+			False,
+			self.username,
+			self.username,
+		)
 
 	async def add_topic(self, sender: Any, **kwargs: str) -> None:
 		topic = kwargs.get("topic")
@@ -167,5 +167,5 @@ class MQTTLogger:
 			if hasattr(self.client, "disconnect"):
 				await self.client.disconnect()
 		except Exception as e:
-			_logger.error(f"Error disconnecting MQTT client: {e}")
-		_logger.info("MQTT logger stopped")
+			logger.error(f"Error disconnecting MQTT client: {e}")
+		logger.info("MQTT logger stopped")
