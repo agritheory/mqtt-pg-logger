@@ -37,4 +37,8 @@ jobs:
           LOG_ALL_TOPICS: "false"
           ALLOW_ALL_TOPICS: "false"
           TESTCONTAINERS_RYUK_DISABLED: "true"
+          FERNET_KEY: ${{ secrets.FERNET_KEY }}
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
         run: poetry run pytest

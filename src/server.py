@@ -22,21 +22,22 @@ def create_app(**kwargs: str) -> Quart:
 	cors_origins = env.list("CORS_ORIGINS", default=["*"])
 	app = cors(Quart(__name__), allow_origin=cors_origins)
 
-	# DB connection details — pool is created asynchronously in before_serving
-	db_url = kwargs.get("db_url") or env.str("DB_URL", None)
-	if not db_url:
-		db_user = kwargs.get("db_user") or env.str("DB_USER")
-		db_password = kwargs.get("db_password") or env.str("DB_PASSWORD")
-		db_host = kwargs.get("db_host") or env.str("DB_HOST")
-		db_port = kwargs.get("db_port") or env.str("DB_PORT", "5432")
-		db_name = kwargs.get("db_name") or env.str("DB_NAME")
-		db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-
 	app.db = None
 	app.cache = {}
 
 	@app.before_serving  # type: ignore[misc]
 	async def init_database() -> None:
+		# DB URL is resolved here, not in create_app(), so importing this module
+		# and calling create_app() is safe without any database env vars set.
+		db_url = kwargs.get("db_url") or env.str("DB_URL", None)
+		if not db_url:
+			db_user = kwargs.get("db_user") or env.str("DB_USER")
+			db_password = kwargs.get("db_password") or env.str("DB_PASSWORD")
+			db_host = kwargs.get("db_host") or env.str("DB_HOST")
+			db_port = kwargs.get("db_port") or env.str("DB_PORT", "5432")
+			db_name = kwargs.get("db_name") or env.str("DB_NAME")
+			db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+
 		app.db = await create_pool(db_url)
 
 		if env.bool("CREATE_SCHEMA", True):

@@ -57,3 +57,4 @@ docker-compose.prod.yml
 alarms.shelve
 *.shelve
 pid_state.shelve.db
+.secrets
