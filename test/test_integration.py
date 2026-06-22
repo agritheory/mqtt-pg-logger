@@ -9,6 +9,7 @@ from typing import Any
 import aiomqtt
 import pytest
 from environs import Env
+from mqtt5 import QoS
 from quart.testing import QuartClient
 from quart.testing import TestApp as QuartTestApp
 
@@ -30,7 +31,7 @@ async def mqtt_client() -> AsyncGenerator[aiomqtt.Client, None]:
 		hostname=host,
 		port=port,
 		username=username,
-		password=password,
+		password=password.encode(),
 	) as client:
 		yield client
 
@@ -60,7 +61,12 @@ async def test_mqtt_message_logging(
 	# Brief yield so the topic_signal propagates to the background task before we publish.
 	await asyncio.sleep(0.1)
 
-	await mqtt_client.publish(test_topic, payload=json.dumps(test_payload).encode(), qos=1)
+	await mqtt_client.publish(
+		test_topic,
+		payload=json.dumps(test_payload).encode(),
+		qos=QoS.AT_LEAST_ONCE,
+		packet_id=next(mqtt_client.packet_ids),
+	)
 
 	# Wait for the background task to process and store the message.
 	await asyncio.sleep(2)

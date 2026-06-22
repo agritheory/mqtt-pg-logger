@@ -1,0 +1,59 @@
+{
+  "generated_at": "2026-06-22T19:04:57Z",
+  "hostname": "tmatteson-pc",
+  "platform": "Linux-6.18.33.1-microsoft-standard-WSL2-x86_64-with-glibc2.35",
+  "ingest_mode": "single",
+  "messages_per_run": 100,
+  "runs": 1,
+  "warmup_messages": 10,
+  "layers": {
+    "layer_a": {
+      "layer": "layer_a",
+      "ingest_mode": "single",
+      "messages_per_run": 100,
+      "runs": 1,
+      "warmup_messages": 10,
+      "run_rates": [
+        444.8016794944002
+      ],
+      "summary": {
+        "ingest_rate_msg_s": {
+          "n": 1,
+          "mean": 444.8016794944002,
+          "stdev": 0.0,
+          "p50": 444.8016794944002,
+          "p95": 444.8016794944002,
+          "ci95_low": 444.8016794944002,
+          "ci95_high": 444.8016794944002
+        },
+        "promoted_total": 100,
+        "rejected_total": 0
+      }
+    },
+    "layer_b": {
+      "layer": "layer_b",
+      "ingest_mode": "single",
+      "messages_per_run": 100,
+      "runs": 1,
+      "warmup_messages": 10,
+      "run_rates": [
+        217.54107381114983
+      ],
+      "summary": {
+        "ingest_rate_msg_s": {
+          "n": 1,
+          "mean": 217.54107381114983,
+          "stdev": 0.0,
+          "p50": 217.54107381114983,
+          "p95": 217.54107381114983,
+          "ci95_low": 217.54107381114983,
+          "ci95_high": 217.54107381114983
+        },
+        "promoted_total": 50,
+        "rejected_total": 0,
+        "e2e_messages_per_run": 50
+      }
+    }
+  },
+  "comparison": null
+}

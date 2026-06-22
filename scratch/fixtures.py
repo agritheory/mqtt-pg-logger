@@ -1,6 +1,6 @@
 import asyncio
 
-from aiomqtt import Client, MqttError
+from aiomqtt import Client, ConnectError, NegativeAckError, ProtocolError
 
 
 async def publish_temperature() -> None:
@@ -9,7 +9,7 @@ async def publish_temperature() -> None:
 		hostname="artemis",  # from *inside* your app container
 		port=1883,
 		username="artemis",
-		password="artemis",
+		password=b"artemis",
 	) as client:
 		await client.publish("temperature/outside", payload=b"28.4")
 		# give the library a chance to flush
@@ -20,5 +20,5 @@ if __name__ == "__main__":
 	try:
 		asyncio.run(publish_temperature())
 		print("✅ Published OK")
-	except MqttError as e:
+	except (ConnectError, NegativeAckError, ProtocolError, OSError) as e:
 		print(f"❌ MQTT error: {e}")

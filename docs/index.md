@@ -306,6 +306,12 @@ When a query partially succeeds, both `data` and `errors` are present.
 
 ---
 
+## Database Migrations
+
+Schema changes are applied automatically at startup via numbered SQL files in the [`migrations/`](../migrations/) directory. Add a new file such as `003_description.sql` for each schema change; the runner records applied versions in `schema_migrations`.
+
+---
+
 ## Generating Cryptographic Keys
 
 ```bash

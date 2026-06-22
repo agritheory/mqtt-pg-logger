@@ -1,0 +1,69 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      ingest_mode:
+        description: Journal ingest mode (single or staging)
+        required: true
+        default: staging
+        type: choice
+        options:
+          - single
+          - staging
+      benchmark_baseline:
+        description: Optional path to baseline JSON in repo (e.g. test/benchmark/baseline.json)
+        required: false
+        default: test/benchmark/baseline.json
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run journal ingest benchmark
+        env:
+          MQTT_USER: artemis
+          MQTT_PASSWORD: artemis
+          MQTT_CLIENT_ID: mqtt-logger-benchmark
+          MQTT_KEEPALIVE: "1"
+          SSL_INSECURE: "true"
+          CREATE_SCHEMA: "true"
+          LOG_ALL_TOPICS: "false"
+          ALLOW_ALL_TOPICS: "true"
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          JOURNAL_INGEST_MODE: ${{ inputs.ingest_mode }}
+          BENCHMARK_MESSAGES: "10000"
+          BENCHMARK_RUNS: "20"
+          BENCHMARK_WARMUP: "1000"
+          ADMIN_EMAIL: admin@agritheory.dev
+          ADMIN_PASSWORD: ohch4GeiSie
+          JWT_SECRET_KEY: 59eggsXI2uU2eaWmmOcr_zMKfhE4rW-h0avo0IKNJS4
+        run: |
+          BASELINE_ARG=""
+          if [ -f "${{ inputs.benchmark_baseline }}" ]; then
+            BASELINE_ARG="--benchmark-baseline=${{ inputs.benchmark_baseline }}"
+          fi
+          poetry run pytest test/benchmark/benchmark_journal.py -m benchmark \
+            --benchmark-output=test/benchmark/${{ inputs.ingest_mode }}.json \
+            $BASELINE_ARG
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ inputs.ingest_mode }}
+          path: test/benchmark/${{ inputs.ingest_mode }}.json

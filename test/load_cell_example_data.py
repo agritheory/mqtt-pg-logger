@@ -9,8 +9,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
-from aiomqtt import Client, MqttError
+from aiomqtt import Client, ConnectError, NegativeAckError, ProtocolError
 from environs import Env
+from mqtt5 import QoS
 
 from pid import PIDControllerStore
 
@@ -133,6 +134,17 @@ class LoadCellPublisher:
 
 		logger.info(f"Initialized publisher for device {self.device_id}")
 
+	async def publish_payload(self, client: Client, topic: str, payload: dict[str, Any]) -> None:
+		qos = QoS(self.qos)
+		kwargs: dict[str, Any] = {
+			"topic": topic,
+			"payload": json.dumps(payload).encode(),
+			"qos": qos,
+		}
+		if qos != QoS.AT_MOST_ONCE:
+			kwargs["packet_id"] = next(client.packet_ids)
+		await client.publish(**kwargs)
+
 	async def publish_data(
 		self, interval: float = 1.0, continuous: bool = True, payload_weight: float | None = None
 	) -> None:
@@ -149,7 +161,7 @@ class LoadCellPublisher:
 				hostname=self.broker,
 				port=self.port,
 				username=self.username,
-				password=self.password,
+				password=self.password.encode(),
 			) as client:
 				logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
 
@@ -158,7 +170,7 @@ class LoadCellPublisher:
 				logger.debug(f"Publishing to topic: {self.topic}")
 				logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
 
-				await client.publish(topic=self.topic, payload=json.dumps(payload), qos=self.qos)
+				await self.publish_payload(client, self.topic, payload)
 
 				PIDControllerStore().compute(
 					pid_id=self.topic,
@@ -168,7 +180,7 @@ class LoadCellPublisher:
 
 				logger.info(f"Published reading: {payload['measurement']['weight']['value']} lb")
 
-		except MqttError as e:
+		except (ConnectError, NegativeAckError, ProtocolError, OSError) as e:
 			logger.error(f"MQTT Connection Error: {e}", exc_info=True)
 			if "Not authorized" in str(e):
 				logger.error("Authentication failed. Please verify:")
@@ -187,7 +199,7 @@ class LoadCellPublisher:
 			hostname=self.broker,
 			port=self.port,
 			username=self.username,
-			password=self.password,
+			password=self.password.encode(),
 		)
 
 	async def publish_n_messages(
@@ -218,7 +230,7 @@ class LoadCellPublisher:
 				hostname=self.broker,
 				port=self.port,
 				username=self.username,
-				password=self.password,
+				password=self.password.encode(),
 			) as client:
 				logger.info(f"Connected to MQTT broker at {self.broker}:{self.port}")
 
@@ -229,7 +241,7 @@ class LoadCellPublisher:
 					logger.debug(f"Publishing to topic: {topic}")
 					logger.debug(f"Payload: {json.dumps(payload, indent=2)}")
 
-					await client.publish(topic=topic, payload=json.dumps(payload), qos=self.qos)
+					await self.publish_payload(client, topic, payload)
 
 					PIDControllerStore().compute(
 						pid_id=topic,
@@ -240,7 +252,7 @@ class LoadCellPublisher:
 					logger.info(f"Published reading: {payload['measurement']['weight']['value']} lb")
 
 					await asyncio.sleep(interval)
-		except MqttError as e:
+		except (ConnectError, NegativeAckError, ProtocolError, OSError) as e:
 			logger.error(f"MQTT Connection Error: {e}", exc_info=True)
 			if "Not authorized" in str(e):
 				logger.error("Authentication failed. Please verify:")
@@ -262,7 +274,7 @@ class LoadCellPublisher:
 
 			logger.debug(f"Publishing to topic: {self.topic}")
 
-			await client.publish(topic=self.topic, payload=json.dumps(payload), qos=self.qos)
+			await self.publish_payload(client, self.topic, payload)
 
 			PIDControllerStore().compute(
 				pid_id=self.topic,
@@ -270,7 +282,7 @@ class LoadCellPublisher:
 				process_value=payload["measurement"]["weight"]["value"],
 			)
 
-		except MqttError as e:
+		except (ConnectError, NegativeAckError, ProtocolError, OSError) as e:
 			logger.error(f"MQTT Connection Error: {e}", exc_info=True)
 			if "Not authorized" in str(e):
 				logger.error("Authentication failed. Please verify:")

@@ -5,11 +5,10 @@ from environs import Env
 from quart import Quart
 from quart_cors import cors
 
-from src.alarm import Alarm
-from src.create_schema import create_pool, initialize_db
+from src.create_schema import create_pool, initialize_db, prune_expired_revoked_tokens
 from src.gql import graphql_bp
 from src.mqtt_logger import MQTTLogger
-from src.signals import alarm_refresh_signal
+from src.signals import alarm_refresh_signal, topic_signal
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -43,29 +42,30 @@ def create_app(**kwargs: str) -> Quart:
 		if env.bool("CREATE_SCHEMA", True):
 			logger.info("Initializing database before serving...")
 			try:
-				fernet_key = env.str("FERNET_KEY", None)
 				admin_email = env.str("ADMIN_EMAIL", None)
 				admin_password = env.str("ADMIN_PASSWORD", None)
 				mqtt_user = env.str("MQTT_USER")
 				await initialize_db(
 					app.db,
-					fernet_key=fernet_key,
 					admin_email=admin_email,
 					admin_password=admin_password,
 					mqtt_user=mqtt_user,
 				)
+				await prune_expired_revoked_tokens(app.db)
 				logger.info("Database initialization completed")
 			except Exception as e:
 				logger.error(f"Database initialization failed: {e}")
 				raise
 
 		await mqtt_handler()
-
-		Alarm()
 		await alarm_refresh_signal.send_async()
 
 	@app.after_serving  # type: ignore[misc]
-	async def close_database() -> None:
+	async def shutdown_services() -> None:
+		if hasattr(app, "mqtt_logger"):
+			await app.mqtt_logger.stop()
+		alarm_refresh_signal.receivers.clear()
+		topic_signal.receivers.clear()
 		if app.db is not None:
 			await app.db.close()
 
@@ -96,8 +96,8 @@ def main() -> None:
 		"src.server:application",
 		host=host,
 		port=port,
-		reload=env.bool("DEBUG", True),
-		log_level="debug" if env.bool("DEBUG", True) else "info",
+		reload=env.bool("DEBUG", False),
+		log_level="debug" if env.bool("DEBUG", False) else "info",
 		workers=env.int("UVICORN_WORKERS", 1),
 	)
 

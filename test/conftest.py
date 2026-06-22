@@ -15,25 +15,21 @@ from typing import Any, cast
 import asyncpg
 import pytest
 import uvloop
-from cryptography.fernet import Fernet
 from quart.testing import QuartClient
 from quart.testing import TestApp as QuartTestApp
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 from testcontainers.postgres import PostgresContainer
-from websockets.asyncio.server import Server, ServerConnection, serve
 
 from src.create_schema import create_admin_user
 from src.server import create_app
 
 
-# Use uvloop for faster event loop
 @pytest.fixture(scope="session")  # type: ignore[misc]
 def event_loop_policy() -> uvloop.EventLoopPolicy:
 	return uvloop.EventLoopPolicy()
 
 
-# Suppress QuartAuth cookie warnings
 warnings.filterwarnings(
 	"ignore", message="The same attribute name/cookie name/salt is used by another QuartAuth instance"
 )
@@ -41,7 +37,6 @@ warnings.filterwarnings(
 
 @pytest.fixture(scope="session")  # type: ignore[misc]
 def artemis_container() -> Generator[dict[str, Any], None, None]:
-	"""Spin up an ActiveMQ Artemis container for the full test session."""
 	container = DockerContainer("apache/activemq-artemis:latest-alpine")
 	container.with_env("EXTRA_ARGS", "--http-host 0.0.0.0 --relax-jolokia")
 	container.with_exposed_ports(1883)
@@ -65,20 +60,21 @@ def artemis_container() -> Generator[dict[str, Any], None, None]:
 async def app(
 	db_url: str, artemis_container: dict[str, Any]
 ) -> AsyncGenerator[QuartTestApp, None]:
-	_app = create_app(db_url=db_url)
-	async with _app.test_app() as test_app:
-		# before_serving has now run: schema exists, pool is live.
-		# Truncate all data tables so every test starts with a clean slate.
-		# CASCADE handles FK ordering (alarm → webhook → user).
+	quart_app = create_app(db_url=db_url)
+	async with quart_app.test_app() as test_app:
 		pool: asyncpg.Pool = test_app.app.db
-		await pool.execute('TRUNCATE alarm, webhook, journal, topic, "user" RESTART IDENTITY CASCADE')
-		# Re-seed the admin user that all tests authenticate as.
-		fernet = Fernet(os.environ["FERNET_KEY"])
+		await pool.execute(
+			"""
+			TRUNCATE alarm, webhook, journal, journal_staging, journal_rejected,
+			topic, pid_state, revoked_token, "user"
+			RESTART IDENTITY CASCADE
+			"""
+		)
 		await create_admin_user(
 			pool,
-			fernet,
 			os.environ["ADMIN_EMAIL"],
 			os.environ["ADMIN_PASSWORD"],
+			is_admin=True,
 		)
 		yield test_app
 
@@ -90,11 +86,7 @@ def test_client(app: QuartTestApp) -> QuartClient:
 
 @pytest.fixture(scope="session")  # type: ignore[misc]
 async def db_url() -> AsyncGenerator[str, None]:
-	"""
-	Start a TimescaleDB container (built on Postgres), create the timescaledb extension,
-	and yield the connection URL.
-	"""
-	image = "timescale/timescaledb:latest-pg16"
+	image = "timescale/timescaledb:latest-pg18"
 
 	container = PostgresContainer(
 		image,
@@ -108,7 +100,6 @@ async def db_url() -> AsyncGenerator[str, None]:
 	container.start()
 
 	conn_url = container.get_connection_url()
-	# asyncpg uses postgresql://, psycopg2 (used by testcontainers) uses postgresql+psycopg2://
 	asyncpg_url = conn_url.replace("postgresql+psycopg2://", "postgresql://")
 
 	pool = await asyncpg.create_pool(asyncpg_url)
@@ -184,11 +175,6 @@ def refresh_token_mutation() -> str:
 
 @pytest.fixture  # type: ignore[misc]
 def execute_graphql(test_client: QuartClient) -> Any:
-	"""
-	Pytest fixture returning an async helper for executing GraphQL queries
-	against the Quart test client and parsing the JSON result.
-	"""
-
 	async def run_graphql(
 		query: str,
 		*,
@@ -207,14 +193,3 @@ def execute_graphql(test_client: QuartClient) -> Any:
 		return cast(dict[str, Any], json.loads(await resp.get_data()))
 
 	return run_graphql
-
-
-async def echo(websocket: ServerConnection) -> None:
-	async for message in websocket:
-		await websocket.send(message)
-
-
-@pytest.fixture  # type: ignore[misc]
-async def websocket_server() -> AsyncGenerator[Server, None]:
-	async with serve(echo, "127.0.0.1", 8765) as server:
-		yield server

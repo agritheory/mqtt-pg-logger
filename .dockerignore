@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.git/
+scratch/
+*.shelve*
+pid_state.shelve.*
+.env
+.secrets
+test/
+docs/

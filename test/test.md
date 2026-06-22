@@ -14,7 +14,7 @@ Docker must be available on the host.
 
 | Fixture | Scope | Description |
 |---------|-------|-------------|
-| `db_url` | session | Starts a `timescale/timescaledb:latest-pg16` container and yields its connection URL |
+| `db_url` | session | Starts a `timescale/timescaledb:latest-pg18` container and yields its connection URL |
 | `artemis_container` | session | Starts an `apache/activemq-artemis:latest-alpine` container and sets `MQTT_BROKER_HOST`/`MQTT_BROKER_PORT` env vars |
 | `app` | function | Creates the Quart app, then truncates all data tables and re-seeds the admin user so each test starts with a clean database. Uses the real `asyncpg.Pool` — no transaction wrapping — so concurrent writes (e.g. throughput tests) work without interference. |
 | `test_client` | function | Quart test client bound to `app` |
@@ -72,9 +72,32 @@ Targets are configurable via environment variables:
 MQTT_TARGET_RATE_SEQUENTIAL=500 MQTT_TARGET_RATE_CONCURRENT=2000 poetry run pytest test/test_throughput.py
 ```
 
-### `test_websocket.py`
+### `test/benchmark/`
 
-Sanity check for the WebSocket echo server fixture used in other tests.
+Statistical **journal ingest** benchmarks (Layer A: in-process store path; Layer B: MQTT → journal E2E). Excluded from default CI (`pytest -m "not benchmark"`).
+
+| Env | Default | Purpose |
+|-----|---------|---------|
+| `BENCHMARK_MESSAGES` | 10000 | Messages per run |
+| `BENCHMARK_RUNS` | 20 | Runs per layer (200k total writes) |
+| `BENCHMARK_WARMUP` | 1000 | Discarded warmup messages per run |
+| `JOURNAL_INGEST_MODE` | `staging` | `single` (baseline) or `staging` |
+| `BENCHMARK_POISON_EVERY` | 100 | Layer A: skip every Nth message (~1% invalid) |
+
+```bash
+# Baseline (single-row insert)
+JOURNAL_INGEST_MODE=single BENCHMARK_MESSAGES=10000 BENCHMARK_RUNS=20 \
+  poetry run pytest test/benchmark/benchmark_journal.py -m benchmark \
+  --benchmark-output=test/benchmark/baseline.json
+
+# After staging + promote
+JOURNAL_INGEST_MODE=staging BENCHMARK_MESSAGES=10000 BENCHMARK_RUNS=20 \
+  poetry run pytest test/benchmark/benchmark_journal.py -m benchmark \
+  --benchmark-output=test/benchmark/staging.json \
+  --benchmark-baseline=test/benchmark/baseline.json
+```
+
+See [`docs/performance.md`](../docs/performance.md) for methodology and SLO recommendations.
 
 ## Publishing Test Messages
 

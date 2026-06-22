@@ -9,21 +9,20 @@ from typing import Any
 import httpx
 import jwt  # PyJWT
 import strawberry
-from cryptography.fernet import Fernet
 from environs import Env
 from graphql import GraphQLError
 from quart import Blueprint, Response, current_app, jsonify, request
 from strawberry.asgi import GraphQL
 from strawberry.types import Info
 
+from src.auth_tokens import is_token_revoked, login_rate_limiter, revoke_token
+from src.passwords import hash_password, is_fernet_legacy_hash, verify_password
 from src.signals import alarm_refresh_signal, topic_signal
 from src.webhook_delivery import generate_signing_secret
 
 env = Env()
 
 graphql_bp = Blueprint("graphql", __name__)
-
-token_blacklist = set()
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ async def get_context() -> Context:
 		try:
 			scheme, token = auth_header.split()
 			if scheme.lower() == "bearer":
-				decoded_token = verify_token(token)
+				decoded_token = await verify_token(token)
 				if decoded_token:
 					context.user = decoded_token
 		except ValueError:
@@ -73,6 +72,19 @@ def token_required(func: Callable) -> Callable:
 	return wrapper
 
 
+def admin_required(func: Callable) -> Callable:
+	@wraps(func)
+	async def wrapper(*args: Any, **kwargs: Any) -> Any:
+		info: Info = kwargs["info"]
+		user = await load_user_context(info.context.user)
+		if not user.is_admin:
+			raise GraphQLError("Admin access required")
+		info.context.user = user
+		return await func(*args, **kwargs)
+
+	return wrapper
+
+
 def generate_token(username: str, expires_delta: datetime.timedelta | None = None) -> str:
 	if expires_delta is None:
 		expires_delta = datetime.timedelta(seconds=env.int("ACCESS_TOKEN_EXPIRES"))
@@ -89,7 +101,7 @@ def generate_token(username: str, expires_delta: datetime.timedelta | None = Non
 	return token
 
 
-def verify_token(token: str) -> dict | None:
+def decode_token(token: str) -> dict | None:
 	try:
 		decoded: dict = jwt.decode(
 			token,
@@ -97,13 +109,20 @@ def verify_token(token: str) -> dict | None:
 			algorithms=["HS256"],
 			options={"verify_exp": True},
 		)
-		if decoded["jti"] in token_blacklist:
-			return None
 		return decoded
 	except jwt.ExpiredSignatureError:
 		return None
 	except jwt.InvalidTokenError:
 		return None
+
+
+async def verify_token(token: str) -> dict | None:
+	decoded = decode_token(token)
+	if not decoded:
+		return None
+	if await is_token_revoked(current_app.db, decoded["jti"]):
+		return None
+	return decoded
 
 
 async def load_user_context(user_context: dict) -> "User":
@@ -125,7 +144,7 @@ async def load_user_context(user_context: dict) -> "User":
 
 	row = await current_app.db.fetchrow(
 		"""
-		SELECT id, username, disabled, refresh_token, creation, modified, owner, modified_by
+		SELECT id, username, disabled, is_admin, refresh_token, creation, modified, owner, modified_by
 		FROM "user"
 		WHERE username = $1
 		""",
@@ -135,6 +154,8 @@ async def load_user_context(user_context: dict) -> "User":
 		raise GraphQLError("User not found")
 
 	row_dict = dict(row)
+	if row_dict.get("refresh_token") is not None:
+		row_dict["refresh_token"] = bytes(row_dict["refresh_token"])
 	user_data = {**row_dict, **user_context}
 	user = User(**user_data)
 
@@ -154,11 +175,12 @@ class User:
 	modified: datetime.datetime
 	owner: str
 	modified_by: str
-	refresh_token: strawberry.Private[str]
-	sub: strawberry.Private[str]
-	exp: strawberry.Private[str]
-	iat: strawberry.Private[str]
-	jti: strawberry.Private[str]
+	is_admin: bool = False
+	refresh_token: strawberry.Private[str | None] = None
+	sub: strawberry.Private[str | None] = None
+	exp: strawberry.Private[int | None] = None
+	iat: strawberry.Private[int | None] = None
+	jti: strawberry.Private[str | None] = None
 
 
 @dataclass
@@ -312,7 +334,7 @@ class Query:
 	async def get_users(self, info: Info) -> list[User]:
 		rows = await current_app.db.fetch(
 			"""
-			SELECT id, username, disabled, creation, modified, owner, modified_by
+			SELECT id, username, disabled, is_admin, creation, modified, owner, modified_by
 			FROM "user"
 			WHERE disabled = false
 			ORDER BY username
@@ -325,7 +347,7 @@ class Query:
 	async def get_user(self, info: Info, user_id: int) -> User | None:
 		row = await current_app.db.fetchrow(
 			"""
-			SELECT id, username, disabled, creation, modified, owner, modified_by
+			SELECT id, username, disabled, is_admin, creation, modified, owner, modified_by
 			FROM "user"
 			WHERE id = $1
 			""",
@@ -339,7 +361,7 @@ class Query:
 		env = Env()
 		health_status = Health(
 			status="ok",
-			timestamp=datetime.datetime.utcnow(),
+			timestamp=datetime.datetime.now(datetime.UTC),
 			timescaledb_status="ok",
 			artemis_status="ok",
 			mqtt_connection="ok",
@@ -353,11 +375,11 @@ class Query:
 				health_status.timescaledb_status = str(e)
 
 		if hasattr(current_app, "mqtt_logger"):
-			if not current_app.mqtt_logger.client.is_connected():
+			if not current_app.mqtt_logger.is_connected():
 				health_status.status = "error"
 				health_status.mqtt_connection = "disconnected"
 
-		mqtt_broker_url = env.str("MQTT_BROKER_HOST ", "artemis")
+		mqtt_broker_url = env.str("MQTT_BROKER_HOST", "artemis")
 		mqtt_broker_web_console_port = env.int("MQTT_BROKER_WEB_CONSOLE_PORT", 8161)
 		try:
 			async with httpx.AsyncClient() as client:
@@ -505,6 +527,11 @@ class Query:
 class Mutation:
 	@strawberry.mutation  # type: ignore[misc]
 	async def login(self, info: Info[Context, Any], input: LoginInput) -> AuthResponse:
+		client_ip = request.remote_addr or "unknown"
+		rate_key = f"{input.username}:{client_ip}"
+		if login_rate_limiter.is_blocked(rate_key):
+			raise GraphQLError("Invalid credentials")
+
 		user = await current_app.db.fetchrow(
 			"""
 			SELECT id, username, password_hash, disabled
@@ -516,21 +543,28 @@ class Mutation:
 		)
 
 		if not user:
+			login_rate_limiter.record_failure(rate_key)
 			raise GraphQLError("Invalid credentials")
 
 		if user["disabled"]:
+			login_rate_limiter.record_failure(rate_key)
 			raise GraphQLError("Account is disabled")
 
 		env = Env()
-		f = Fernet(env.str("FERNET_KEY").encode())
-
-		stored_hash = bytes(user["password_hash"])
-		try:
-			decrypted_password = f.decrypt(stored_hash).decode()
-			if decrypted_password != input.password:
-				raise GraphQLError("Invalid credentials")
-		except Exception:
+		stored_hash = user["password_hash"]
+		fernet_key = env.str("FERNET_KEY", None)
+		if not verify_password(stored_hash, input.password, fernet_key=fernet_key):
+			login_rate_limiter.record_failure(rate_key)
 			raise GraphQLError("Invalid credentials")
+
+		login_rate_limiter.clear(rate_key)
+
+		if stored_hash and is_fernet_legacy_hash(stored_hash):
+			await current_app.db.execute(
+				'UPDATE "user" SET password_hash = $1 WHERE id = $2',
+				hash_password(input.password),
+				user["id"],
+			)
 
 		access_token = generate_token(user["username"])
 		refresh_token = generate_token(
@@ -555,27 +589,41 @@ class Mutation:
 	@strawberry.mutation  # type: ignore[misc]
 	async def refresh_token(self, info: Info[Context, Any], input: RefreshTokenInput) -> AuthResponse:
 		env = Env()
-		try:
-			verify_token(input.refresh_token)
-		except jwt.exceptions.InvalidTokenError:
+		decoded = decode_token(input.refresh_token)
+		if not decoded:
+			raise GraphQLError("Invalid refresh token")
+		if await is_token_revoked(current_app.db, decoded["jti"]):
 			raise GraphQLError("Invalid refresh token")
 
-		user = await load_user_context(info.context.user)
-		stored_refresh_token = user.refresh_token.decode() if user.refresh_token else None
+		username = decoded.get("sub")
+		if not username:
+			raise GraphQLError("Invalid refresh token")
 
+		user_row = await current_app.db.fetchrow(
+			"""
+			SELECT id, username, refresh_token, disabled
+			FROM "user"
+			WHERE username = $1
+			""",
+			username,
+		)
+		if not user_row or user_row["disabled"]:
+			raise GraphQLError("Invalid refresh token")
+
+		stored_refresh_token = user_row["refresh_token"].decode() if user_row["refresh_token"] else None
 		if not stored_refresh_token or stored_refresh_token != input.refresh_token:
 			raise GraphQLError("Invalid refresh token")
 
-		new_access_token = generate_token(user.username)
+		new_access_token = generate_token(user_row["username"])
 		new_refresh_token = generate_token(
-			user.username,
+			user_row["username"],
 			expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES")),
 		)
 
 		await current_app.db.execute(
 			'UPDATE "user" SET refresh_token = $1 WHERE id = $2',
 			bytes(new_refresh_token.encode()),
-			user.id,
+			user_row["id"],
 		)
 
 		return AuthResponse(
@@ -590,7 +638,13 @@ class Mutation:
 	@token_required
 	async def logout(self, info: Info[Context, Any]) -> bool:
 		user = await load_user_context(info.context.user)
-		token_blacklist.add(user.jti)
+		exp = user.exp
+		if exp is None:
+			raise GraphQLError("Invalid token")
+		expires_at = datetime.datetime.fromtimestamp(int(exp), tz=datetime.UTC)
+		if user.jti is None:
+			raise GraphQLError("Invalid token")
+		await revoke_token(current_app.db, user.jti, expires_at)
 		return True
 
 	@strawberry.mutation  # type: ignore[misc]
@@ -640,20 +694,19 @@ class Mutation:
 
 	@strawberry.mutation  # type: ignore[misc]
 	@token_required
+	@admin_required
 	async def create_user(self, info: Info, input: UserInput) -> User:
 		user = await load_user_context(info.context.user)
-		env = Env()
-		f = Fernet(env.str("FERNET_KEY").encode())
 
-		encrypted_password = f.encrypt(input.password.encode()) if input.password else b""
+		password_hash = hash_password(input.password) if input.password else None
 		row = await current_app.db.fetchrow(
 			"""
-			INSERT INTO "user" (username, password_hash, disabled, owner, modified_by)
-			VALUES ($1, $2, $3, $4, $5)
-			RETURNING id, username, disabled, creation, modified, owner, modified_by
+			INSERT INTO "user" (username, password_hash, disabled, is_admin, owner, modified_by)
+			VALUES ($1, $2, $3, false, $4, $5)
+			RETURNING id, username, disabled, is_admin, creation, modified, owner, modified_by
 			""",
 			input.username,
-			encrypted_password,
+			password_hash,
 			input.disabled,
 			user.username,
 			user.username,
@@ -662,10 +715,9 @@ class Mutation:
 
 	@strawberry.mutation  # type: ignore[misc]
 	@token_required
+	@admin_required
 	async def update_user(self, info: Info, id: int, input: UserInput) -> User:
 		user = await load_user_context(info.context.user)
-		env = Env()
-		f = Fernet(env.str("FERNET_KEY").encode())
 		row = await current_app.db.fetchrow(
 			"""
 			UPDATE "user"
@@ -675,10 +727,10 @@ class Mutation:
 				modified = CURRENT_TIMESTAMP,
 				modified_by = $4
 			WHERE id = $5
-			RETURNING id, username, disabled, creation, modified, owner, modified_by
+			RETURNING id, username, disabled, is_admin, creation, modified, owner, modified_by
 			""",
 			input.username,
-			f.encrypt(input.password.encode()),
+			hash_password(input.password),
 			input.disabled,
 			user.username,
 			id,
@@ -689,6 +741,8 @@ class Mutation:
 	@token_required
 	async def create_webhook(self, info: Info, input: WebhookInput) -> Webhook:
 		user = await load_user_context(info.context.user)
+		if not user.is_admin:
+			raise GraphQLError("Admin access required")
 		signing_secret = generate_signing_secret()
 		row = await current_app.db.fetchrow(
 			"""
@@ -709,6 +763,18 @@ class Mutation:
 	@token_required
 	async def alarm(self, info: Info, input: AlarmInput) -> Alarm:
 		user = await load_user_context(info.context.user)
+
+		if input.id is not None:
+			existing = await current_app.db.fetchrow(
+				"SELECT owner FROM alarm WHERE id = $1",
+				input.id,
+			)
+			if not existing:
+				raise GraphQLError("Alarm not found")
+			if not user.is_admin and existing["owner"] != user.username:
+				raise GraphQLError("Not authorized to modify this alarm")
+		elif not user.is_admin and input.owner != user.username:
+			raise GraphQLError("Not authorized to create alarms for another owner")
 
 		if input.delivery_method == "mqtt":
 			if not input.forward_topic:

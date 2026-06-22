@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 # System dependencies, including curl
 RUN apt-get update && apt-get install -y \
@@ -32,5 +32,6 @@ ENV PYTHONTRACEMALLOC=1
 
 EXPOSE 5000
 
-# Run the service
-CMD ["poetry", "run", "start"]
+# Run the service (deps are on system Python; do not use `poetry run`, which
+# would pick up a host .venv if one were ever copied into the image)
+CMD ["python", "-c", "from src.server import main; main()"]

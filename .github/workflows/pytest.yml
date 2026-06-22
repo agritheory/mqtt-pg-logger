@@ -41,4 +41,4 @@ jobs:
           ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL || 'admin@agritheory.dev' }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD || 'ohch4GeiSie' }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY || '59eggsXI2uU2eaWmmOcr_zMKfhE4rW-h0avo0IKNJS4' }}
-        run: poetry run pytest
+        run: poetry run pytest -m "not benchmark"
