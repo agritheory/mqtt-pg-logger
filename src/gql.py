@@ -87,7 +87,7 @@ def admin_required(func: Callable) -> Callable:
 
 def generate_token(username: str, expires_delta: datetime.timedelta | None = None) -> str:
 	if expires_delta is None:
-		expires_delta = datetime.timedelta(seconds=env.int("ACCESS_TOKEN_EXPIRES"))
+		expires_delta = datetime.timedelta(seconds=env.int("ACCESS_TOKEN_EXPIRES", 3600))
 
 	expires = datetime.datetime.now(datetime.UTC) + expires_delta
 	token_data: dict = {
@@ -569,7 +569,7 @@ class Mutation:
 		access_token = generate_token(user["username"])
 		refresh_token = generate_token(
 			user["username"],
-			expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES")),
+			expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES", 2_592_000)),
 		)
 
 		await current_app.db.execute(
@@ -583,7 +583,7 @@ class Mutation:
 			access_token=access_token,
 			refresh_token=refresh_token,
 			token_type="bearer",
-			expires_in=env.int("ACCESS_TOKEN_EXPIRES"),
+			expires_in=env.int("ACCESS_TOKEN_EXPIRES", 3600),
 		)
 
 	@strawberry.mutation  # type: ignore[misc]
@@ -617,7 +617,7 @@ class Mutation:
 		new_access_token = generate_token(user_row["username"])
 		new_refresh_token = generate_token(
 			user_row["username"],
-			expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES")),
+			expires_delta=datetime.timedelta(seconds=env.int("REFRESH_TOKEN_EXPIRES", 2_592_000)),
 		)
 
 		await current_app.db.execute(
@@ -631,7 +631,7 @@ class Mutation:
 			access_token=new_access_token,
 			refresh_token=new_refresh_token,
 			token_type="bearer",
-			expires_in=env.int("ACCESS_TOKEN_EXPIRES"),
+			expires_in=env.int("ACCESS_TOKEN_EXPIRES", 3600),
 		)
 
 	@strawberry.mutation  # type: ignore[misc]
