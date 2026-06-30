@@ -1,67 +1,46 @@
-name: CI
+name: Pytest
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
-    branches:
-      - main
-
-permissions:
-  contents: read
+    branches: [ main ]
 
 jobs:
-  compose:
-    name: Compose
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Run docker-compose
-        uses: hoverkraft-tech/compose-action@v2.0.1
-
   test:
-    name: Pytest
-    needs: compose
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        id: setup-python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: "3.12"
-          cache: "pip"
 
       - name: Install Poetry
         uses: snok/install-poetry@v1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
-          virtualenvs-path: .venv
-          installer-parallel: true
-
-      - name: Load cached venv
-        id: cached-poetry-dependencies
-        uses: actions/cache@v3
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
 
       - name: Install dependencies
-        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-        run: poetry install --no-interaction --no-root
+        run: poetry install
 
-      - name: Install project
-        run: poetry install --no-interaction
-
-      - name: Test with pytest
-        run: |
-          source .venv/bin/activate
-          pytest .
+      - name: Run tests
+        env:
+          MQTT_USER: artemis
+          MQTT_PASSWORD: artemis
+          MQTT_CLIENT_ID: mqtt-logger-test
+          MQTT_KEEPALIVE: "1"
+          MQTT_DEFAULT_PROTOCOL: "5"
+          MQTT_DEFAULT_QUALITY: "1"
+          SSL_INSECURE: "true"
+          CREATE_SCHEMA: "true"
+          LOG_ALL_TOPICS: "false"
+          ALLOW_ALL_TOPICS: "false"
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          FERNET_KEY: ${{ secrets.FERNET_KEY || 'D7jNgKGahOrZtQVd9reaT53B4SAz-gLH2ZJtRStpCsY=' }}
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL || 'admin@agritheory.dev' }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD || 'ohch4GeiSie' }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY || '59eggsXI2uU2eaWmmOcr_zMKfhE4rW-h0avo0IKNJS4' }}
+          ACCESS_TOKEN_EXPIRES: "3600"
+          REFRESH_TOKEN_EXPIRES: "2592000"
+        run: poetry run pytest -m "not benchmark"

@@ -52,6 +52,28 @@ repos:
     hooks:
       - id: black
 
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.9.0
+    hooks:
+      - id: mypy
+        files: ^(src/|tests/|).*\.py$
+        args:
+          - --warn-return-any
+          - --disallow-untyped-defs
+          - --disallow-incomplete-defs
+          - --check-untyped-defs
+          - --disallow-untyped-decorators
+          - --show-error-codes
+          - --pretty
+
+  - repo: https://github.com/agritheory/test_utils
+    rev: v1.25.1
+    hooks:
+      - id: semgrep_fmt
+        args:
+          - "--config=.semgrep.yml"
+          - "--disable-version-check"
+          - "--skip-unknown-extensions"
 
 ci:
   autoupdate_schedule: weekly

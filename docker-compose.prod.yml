@@ -9,12 +9,12 @@ services:
     volumes:
     - ./certs:/etc/ssl/certs
     - ./etc-override:/var/lib/artemis-instance/etc-override # broker.xml override
-    -  artemis-data:/var/lib/artemis-instance/data 
+    -  artemis-data:/var/lib/artemis-instance/data
     environment:
     - EXTRA_ARGS=--http-host 0.0.0.0 --relax-jolokia --ssl-key /etc/ssl/certs/[keystore.jks] --ssl-key-password [password] # Needed for Web Console HTTPs
     restart: unless-stopped
 
-  mqtt-pg-logger:
+  mqtt-logger:
     build: .
     develop:
       watch:
@@ -25,7 +25,7 @@ services:
       - timescaledb
     environment:
       - MQTT_HOST=artemis.falk.host
-      - MQTT_PORT=8883 
+      - MQTT_PORT=8883
       - MQTT_USER=artemis
       - MQTT_PASSWORD=artemis
       - DATABASE_HOST=timescaledb
@@ -44,10 +44,42 @@ services:
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_USER=postgres
       - POSTGRES_DB=postgres
+      - TSDB_URL # Use the TSDB_URL environment variable for the domain
     volumes:
       - timescaledb-data:/var/lib/postgresql/data
+      - ./letsencrypt:/etc/letsencrypt
+    restart: unless-stopped
+    entrypoint: ["/bin/ash", "-c"]
+    command: |
+      apk add --no-cache certbot
+      certbot certonly --standalone -d $TSDB_URL
+      echo "ssl = on" >> /etc/postgresql/postgresql.conf
+      echo "ssl_cert_file = '/etc/letsencrypt/live/$TSDB_URL/fullchain.pem'" >> /etc/postgresql/postgresql.conf
+      echo "ssl_key_file = '/etc/letsencrypt/live/$TSDB_URL/privkey.pem'" >> /etc/postgresql/postgresql.conf
+      pg_ctl restart -D /var/lib/postgresql/data
+
+  caddy:
+    image: caddy:latest
+    ports:
+      - 80:80
+      - 443:443
+    environment:
+      - CADDYFILE_CONTENT=
+        $DOMAIN {
+            reverse_proxy mqtt-logger:5000
+        }
+    command: run --config /etc/caddy/Caddyfile.json
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - app-network
+    depends_on:
+      - mqtt-logger
     restart: unless-stopped
 
 volumes:
   artemis-data:
+  caddy_data:
+  caddy_config:
   timescaledb-data:

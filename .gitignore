@@ -50,3 +50,13 @@ mqtt-pg-logger.yaml
 mqtt-pg-logger.service
 broker.xml
 certs
+.env
+
+# Hasn't been proprietary before, it will be going forward
+docker-compose.prod.yml
+alarms.shelve
+*.shelve
+pid_state.shelve.db
+pid_state.shelve.*
+*.shelve.*
+.secrets
